@@ -12,7 +12,8 @@ We'll swap in Claude when we have the API key.
 
 from dataclasses import dataclass
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.test import TestModel
+from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from bus.redis_bus import Bus
 from tools.speak import speak as speak_impl
@@ -28,8 +29,10 @@ class GaryDeps:
 
 
 agent = Agent(
-    model=TestModel(),
-    deps_type=GaryDeps,
+     model=OpenAIModel(
+        model_name="qwen2.5:3b",
+        provider=OpenAIProvider(base_url="http://localhost:11434/v1"),
+    ),
     system_prompt=(
         "You are Gary, a personal assistant living in the user's smart glasses. "
         "Tone: like a friend looking over their shoulder. Casual, sharp, brief. "
