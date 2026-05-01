@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Environment variables (API keys, secrets!)
+.env
+.env.local
+.env.*.local
+
+# uv
+# (keep uv.lock — it should be committed)
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Gary-specific
+# SQLite database files (memory) — local data, don't commit
+*.db
+*.sqlite
+*.sqlite3
+memory/*.db
+
+# Temporary screenshots, audio files, etc.
+tmp/
+*.png.tmp
+screenshots/
+recordings/
+
+# Model files (large binary downloads)
+*.gguf
+*.bin
+models/

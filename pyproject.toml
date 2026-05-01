@@ -1,0 +1,11 @@
+[project]
+name = "gary-2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.13.3",
+    "pydantic-ai>=1.89.0",
+    "redis>=7.4.0",
+]
