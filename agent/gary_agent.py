@@ -20,6 +20,7 @@ from tools.speak import speak as speak_impl
 from tools.request_screenshot import request_screenshot as request_screenshot_impl
 from tools.show_popup import show_popup as show_popup_impl
 from tools.copy_to_clipboard import copy_to_clipboard as copy_to_clipboard_impl
+from tools.home_assistant import control_bulb as control_bulb_impl
 
 
 @dataclass
@@ -44,9 +45,11 @@ agent = Agent(
         "- request_screenshot: ask the laptop to capture the screen\n"
         "- show_popup: show text on the laptop screen\n"
         "- copy_to_clipboard: copy text so the user can paste it\n"
+        "- control_bulb: turn the smart bulb on, off, or toggle it\n"
         "\n"
         "When the user asks for a prompt, code, or anything they'll paste elsewhere, "
-        "use show_popup AND copy_to_clipboard together, then speak a short confirmation."
+        "use show_popup AND copy_to_clipboard together, then speak a short confirmation. "
+        "When the user asks about lights, the bulb, or the lamp, use control_bulb."
     ),
 )
 
@@ -73,3 +76,9 @@ async def show_popup(ctx: RunContext[GaryDeps], text: str, title: str = "Gary") 
 async def copy_to_clipboard(ctx: RunContext[GaryDeps], text: str) -> str:
     """Copy text to the user's clipboard."""
     return await copy_to_clipboard_impl(text, ctx.deps.bus)
+
+
+@agent.tool
+async def control_bulb(ctx: RunContext[GaryDeps], action: str) -> str:
+    """Control the smart bulb. action must be 'on', 'off', or 'toggle'."""
+    return await control_bulb_impl(action, ctx.deps.bus) 
