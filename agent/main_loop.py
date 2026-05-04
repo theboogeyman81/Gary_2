@@ -15,6 +15,7 @@ import asyncio
 from bus.redis_bus import Bus
 from events.schema import Event
 from agent.gary_agent import agent, GaryDeps
+from memory.store import init_db
 
 
 async def handle_speech(event: Event, deps: GaryDeps) -> None:
@@ -35,6 +36,7 @@ async def handle_speech(event: Event, deps: GaryDeps) -> None:
 async def main():
     bus = Bus()
     await bus.connect()
+    await init_db()
     
     deps = GaryDeps(bus=bus)
     

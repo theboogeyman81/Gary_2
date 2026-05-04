@@ -21,6 +21,11 @@ from tools.request_screenshot import request_screenshot as request_screenshot_im
 from tools.show_popup import show_popup as show_popup_impl
 from tools.copy_to_clipboard import copy_to_clipboard as copy_to_clipboard_impl
 from tools.home_assistant import control_bulb as control_bulb_impl
+from tools.memory import (
+    remember as remember_impl,
+    recall as recall_impl,
+    forget as forget_impl,
+)
 
 
 @dataclass
@@ -46,10 +51,15 @@ agent = Agent(
         "- show_popup: show text on the laptop screen\n"
         "- copy_to_clipboard: copy text so the user can paste it\n"
         "- control_bulb: turn the smart bulb on, off, or toggle it\n"
+        "- remember: save a fact when the user tells you to\n"
+        "- recall: search for facts you've saved\n"
+        "- forget: delete a saved fact by ID\n"
         "\n"
         "When the user asks for a prompt, code, or anything they'll paste elsewhere, "
         "use show_popup AND copy_to_clipboard together, then speak a short confirmation. "
-        "When the user asks about lights, the bulb, or the lamp, use control_bulb."
+        "When the user asks about lights, the bulb, or the lamp, use control_bulb. "
+        "When the user says 'remember' or 'save', use the remember tool. "
+        "When the user asks 'what did I say about...', 'what do I prefer...', use recall."
     ),
 )
 
@@ -82,3 +92,21 @@ async def copy_to_clipboard(ctx: RunContext[GaryDeps], text: str) -> str:
 async def control_bulb(ctx: RunContext[GaryDeps], action: str) -> str:
     """Control the smart bulb. action must be 'on', 'off', or 'toggle'."""
     return await control_bulb_impl(action, ctx.deps.bus) 
+
+
+@agent.tool
+async def remember(ctx: RunContext[GaryDeps], fact: str, category: str = "general") -> str:
+    """Save a fact about the user to long-term memory."""
+    return await remember_impl(fact, category)
+
+
+@agent.tool
+async def recall(ctx: RunContext[GaryDeps], query: str) -> str:
+    """Search long-term memory for facts matching a query."""
+    return await recall_impl(query)
+
+
+@agent.tool
+async def forget(ctx: RunContext[GaryDeps], memory_id: int) -> str:
+    """Delete a memory by its ID."""
+    return await forget_impl(memory_id)
