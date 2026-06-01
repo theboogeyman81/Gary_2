@@ -68,15 +68,20 @@ async def handle_request_screenshot(event: Event) -> None:
 
 async def handle_show_popup(event: Event) -> None:
     """Show a real popup window with the event's title and text."""
+    import traceback
     title = event.payload.get("title", "Gary")
     text = event.payload.get("text", "")
     print(f"[laptop_app] 💬 Popup: [{title}] {text[:60]}")
     
-    # Show the popup. Keep reference so it stays alive.
-    popup = show_popup(title, text)
-    _open_popups.append(popup)
+    try:
+        popup = show_popup(title, text)
+        _open_popups.append(popup)
+        print(f"[laptop_app]    Popup created: {popup}")
+    except Exception as e:
+        print(f"[laptop_app]    ❌ Popup error: {e}")
+        traceback.print_exc()
 
-
+        
 async def handle_copy_to_clipboard(event: Event) -> None:
     """Write the event's text to the system clipboard."""
     from PyQt6.QtWidgets import QApplication
