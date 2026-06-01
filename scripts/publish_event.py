@@ -35,8 +35,14 @@ async def main():
         payload = {"gesture": content}
     elif event_type == "speak":
         payload = {"text": content}
+    elif event_type == "show_popup":
+        payload = {"title": "Gary", "text": content}
+    elif event_type == "copy_to_clipboard":
+        payload = {"text": content}
+    elif event_type == "request_screenshot":
+        payload = {"reason": content}
     else:
-        # Generic fallback — just dump the content under a "value" key.
+        # Generic fallback
         payload = {"value": content}
 
     # Connect to the bus and publish.
