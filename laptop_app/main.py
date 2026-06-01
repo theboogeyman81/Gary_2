@@ -51,11 +51,19 @@ async def handle_show_popup(event: Event) -> None:
 
 
 async def handle_copy_to_clipboard(event: Event) -> None:
-    """Placeholder — we'll implement in Session 3."""
+    """Write the event's text to the system clipboard."""
+    from PyQt6.QtWidgets import QApplication
+    
     text = event.payload.get("text", "")
+    if not text:
+        print("[laptop_app] 📋 Copy requested but no text provided")
+        return
+    
+    clipboard = QApplication.clipboard()
+    clipboard.setText(text)
+    
     preview = text[:50] + "..." if len(text) > 50 else text
-    print(f"[laptop_app] 📋 Copy to clipboard: {preview}")
-    print(f"[laptop_app]    (not implemented yet — coming Session 3)")
+    print(f"[laptop_app] 📋 Copied to clipboard: {preview}")
 
 
 HANDLERS = {
