@@ -54,3 +54,7 @@ recordings/
 *.gguf
 *.bin
 models/
+
+# Screenshots from laptop app
+screenshots/
+~/.gary/

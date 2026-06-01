@@ -30,13 +30,40 @@ LAPTOP_EVENTS = {
 
 # Keep references to open popups so they don't get garbage collected.
 _open_popups = []
-
+# Module-level bus reference, set in bus_loop().
+_bus: Bus | None = None
 
 async def handle_request_screenshot(event: Event) -> None:
-    """Placeholder — we'll implement in Session 4."""
+    """Capture the screen and publish a screenshot_taken event back to the bus."""
+    from laptop_app.screenshot import capture_screen
+    
     reason = event.payload.get("reason", "no reason given")
     print(f"[laptop_app] 📸 Screenshot requested. Reason: {reason}")
-    print(f"[laptop_app]    (not implemented yet — coming Session 4)")
+    
+    try:
+        # Run the blocking screenshot in a thread so we don't block the event loop
+        result = await asyncio.to_thread(capture_screen)
+        print(f"[laptop_app]    Captured {result['width']}x{result['height']} → {result['path']}")
+        
+        # Publish back to the bus so the agent knows the screenshot is ready
+        await _bus.publish(Event(
+            type="screenshot_taken",
+            source="laptop_app",
+            payload={
+                "path": result["path"],
+                "base64": result["base64"],
+                "width": result["width"],
+                "height": result["height"],
+                "reason": reason,
+            },
+        ))
+    except Exception as e:
+        print(f"[laptop_app]    ❌ Screenshot failed: {e}")
+        await _bus.publish(Event(
+            type="screenshot_failed",
+            source="laptop_app",
+            payload={"error": str(e), "reason": reason},
+        ))
 
 
 async def handle_show_popup(event: Event) -> None:
@@ -75,8 +102,9 @@ HANDLERS = {
 
 async def bus_loop():
     """The async loop that subscribes to the bus and dispatches events."""
-    bus = Bus()
-    await bus.connect()
+    global _bus
+    _bus = Bus()
+    await _bus.connect()
 
     print("─" * 80)
     print("  Gary laptop companion app")
@@ -85,13 +113,13 @@ async def bus_loop():
     print("─" * 80)
 
     try:
-        async for event in bus.subscribe():
+        async for event in _bus.subscribe():
             if event.type in LAPTOP_EVENTS:
                 handler = HANDLERS.get(event.type)
                 if handler:
                     await handler(event)
     finally:
-        await bus.close()
+        await _bus.close()
 
 
 def main():
