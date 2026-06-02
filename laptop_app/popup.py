@@ -4,14 +4,17 @@ Popup window for Gary's laptop companion app.
 Hybrid quarter-circle notification:
 - Appears as a 200px outlined arc in the bottom-right corner
 - Clicking expands it into a full rectangular card with the message
+
+Uses setMask() for shape clipping instead of translucent backgrounds,
+which avoids macOS rendering issues with frameless + transparent windows.
 """
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QApplication, QGraphicsDropShadowEffect
+    QTextEdit, QApplication
 )
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QRectF
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QPoint, QRectF, QRect
+from PyQt6.QtGui import QColor, QPainter, QPen, QRegion, QPainterPath
 
 
 # ─── Design tokens ───────────────────────────────────────────────
@@ -27,12 +30,12 @@ INDICATOR_LINE_WIDTH = 3
 
 CARD_WIDTH = 400
 CARD_HEIGHT = 320
-EDGE_MARGIN = 0
+CARD_RADIUS = 14
 
 
 # ─── The outlined quarter-circle indicator ──────────────────────
 class GaryIndicator(QWidget):
-    """Small outlined quarter-circle in the bottom-right of the screen."""
+    """Outlined quarter-circle in the bottom-right of the screen."""
 
     def __init__(self, title: str, text: str, on_click):
         super().__init__()
@@ -41,41 +44,58 @@ class GaryIndicator(QWidget):
         self.on_click = on_click
         self._build()
         self._position()
+        self._apply_mask()
         self._animate_in()
 
     def _build(self) -> None:
-        # Frameless + always on top, but NO Tool flag (it hides on macOS)
+        # Frameless only — no translucency
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.WindowDoesNotAcceptFocus
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFixedSize(INDICATOR_SIZE, INDICATOR_SIZE)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _apply_mask(self) -> None:
+        """
+        Mask the window so only the area near the arc is visible.
+        Without this, we'd see a 200x200 dark square.
+        """
+        # Build a region that's just a thin ring matching the arc shape.
+        # We use two ellipses: outer (radius=200) minus inner (radius=200-strokewidth*4)
+        # then we mask to only show the upper-left quadrant.
+        center_x, center_y = INDICATOR_SIZE, INDICATOR_SIZE  # bottom-right corner of widget
+        outer_r = INDICATOR_SIZE
+        inner_r = INDICATOR_SIZE - (INDICATOR_LINE_WIDTH * 6)  # ring thickness
+
+        # Create a path for the ring portion in the upper-left quadrant
+        path = QPainterPath()
+        # Outer arc quadrant
+        path.moveTo(center_x - outer_r, center_y)
+        path.arcTo(
+            center_x - outer_r, center_y - outer_r,
+            outer_r * 2, outer_r * 2,
+            180, -90,
+        )
+        # Line to inner arc start
+        path.lineTo(center_x, center_y - inner_r)
+        # Inner arc quadrant (reverse direction)
+        path.arcTo(
+            center_x - inner_r, center_y - inner_r,
+            inner_r * 2, inner_r * 2,
+            90, 90,
+        )
+        path.closeSubpath()
+
+        region = QRegion(path.toFillPolygon().toPolygon())
+        self.setMask(region)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Draw the arc.
-        # Bounding rect for the full circle centered at the widget's bottom-right corner.
-        full_circle_rect = QRectF(
-            -INDICATOR_SIZE,
-            -INDICATOR_SIZE,
-            INDICATOR_SIZE * 2,
-            INDICATOR_SIZE * 2,
-        )
-
-        pen = QPen(QColor(COLOR_ACCENT))
-        pen.setWidth(INDICATOR_LINE_WIDTH)
-        painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-
-        # Qt arcs: 1/16th of a degree, starting from 3 o'clock, going CCW.
-        # 90° to 180° = upper-left quadrant.
-        painter.drawArc(full_circle_rect, 90 * 16, 90 * 16)
+        # Fill the visible (masked) region with the accent color
+        painter.fillRect(self.rect(), QColor(COLOR_ACCENT))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -84,14 +104,14 @@ class GaryIndicator(QWidget):
 
     def _position(self) -> None:
         screen = QApplication.primaryScreen().availableGeometry()
-        x = screen.center().x() - INDICATOR_SIZE // 2
-        y = screen.center().y() - INDICATOR_SIZE // 2
+        x = screen.right() - INDICATOR_SIZE
+        y = screen.bottom() - INDICATOR_SIZE
         self.move(x, y)
 
     def _animate_in(self) -> None:
         self.setWindowOpacity(0.0)
         self.show()
-        self.raise_()  # Force to front
+        self.raise_()
 
         self._anim = QPropertyAnimation(self, b"windowOpacity")
         self._anim.setDuration(280)
@@ -119,6 +139,7 @@ class GaryCard(QWidget):
         self._drag_pos = None
         self._build(title, text)
         self._position()
+        self._apply_rounded_mask()
         self._animate_in()
 
     def _build(self, title: str, text: str) -> None:
@@ -126,29 +147,22 @@ class GaryCard(QWidget):
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.resize(CARD_WIDTH, CARD_HEIGHT)
 
-        self.card = QWidget(self)
-        self.card.setGeometry(0, 0, CARD_WIDTH, CARD_HEIGHT)
-        self.card.setStyleSheet(f"""
-            QWidget {{
+        # Set the whole widget's background — no child widget needed since
+        # we're not using translucency
+        self.setStyleSheet(f"""
+            QWidget#root {{
                 background-color: {COLOR_BG};
-                border-radius: 14px;
-                border: 1px solid {COLOR_BORDER};
             }}
         """)
+        self.setObjectName("root")
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(40)
-        shadow.setOffset(0, 8)
-        shadow.setColor(QColor(0, 0, 0, 180))
-        self.card.setGraphicsEffect(shadow)
-
-        layout = QVBoxLayout(self.card)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 16)
         layout.setSpacing(10)
 
+        # Top: title + close
         top = QHBoxLayout()
         title_label = QLabel(title)
         title_label.setStyleSheet(f"""
@@ -156,7 +170,6 @@ class GaryCard(QWidget):
             font-size: 14px;
             font-weight: 600;
             background: transparent;
-            border: none;
         """)
         top.addWidget(title_label)
         top.addStretch()
@@ -181,6 +194,7 @@ class GaryCard(QWidget):
         top.addWidget(close_btn)
         layout.addLayout(top)
 
+        # Body
         self.text_area = QTextEdit()
         self.text_area.setPlainText(text)
         self.text_area.setReadOnly(True)
@@ -207,6 +221,7 @@ class GaryCard(QWidget):
         """)
         layout.addWidget(self.text_area, stretch=1)
 
+        # Bottom: copy button
         bot = QHBoxLayout()
         bot.addStretch()
         self.copy_btn = QPushButton("Copy")
@@ -232,6 +247,16 @@ class GaryCard(QWidget):
         self.copy_btn.clicked.connect(self._copy_text)
         bot.addWidget(self.copy_btn)
         layout.addLayout(bot)
+
+    def _apply_rounded_mask(self) -> None:
+        """Clip the window to rounded corners using setMask."""
+        path = QPainterPath()
+        path.addRoundedRect(
+            QRectF(0, 0, CARD_WIDTH, CARD_HEIGHT),
+            CARD_RADIUS, CARD_RADIUS,
+        )
+        region = QRegion(path.toFillPolygon().toPolygon())
+        self.setMask(region)
 
     def _position(self) -> None:
         screen = QApplication.primaryScreen().availableGeometry()
@@ -288,7 +313,7 @@ class GaryCard(QWidget):
         self._drag_pos = None
 
 
-# ─── The orchestrator ───────────────────────────────────────────
+# ─── Orchestrator ───────────────────────────────────────────────
 class GaryPopup:
     def __init__(self, title: str, text: str):
         self.title = title
