@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-ai>=1.89.0",
     "pyqt6>=6.11.0",
     "python-dotenv>=1.2.2",
+    "pywebview>=6.2.1",
     "qasync>=0.28.0",
     "redis>=7.4.0",
     "websockets>=16.0",
