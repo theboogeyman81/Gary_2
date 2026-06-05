@@ -27,7 +27,7 @@ from laptop_app.screenshot import capture_screen
 
 INDEX_HTML = Path(__file__).parent / "web" / "index.html"
 
-LAPTOP_EVENTS = {"show_popup", "request_screenshot", "copy_to_clipboard"}
+LAPTOP_EVENTS = {"show_popup", "request_screenshot", "copy_to_clipboard", "request_permission"}
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +43,14 @@ class PythonAPI:
     def copy_to_clipboard(self, text: str) -> None:
         subprocess.run(["pbcopy"], input=text.encode())
         print(f"[gary] 📋 copied: {text[:60]}")
+
+    def permission_response(self, allowed: bool) -> None:
+        event_type = "permission_granted" if allowed else "permission_denied"
+        print(f"[gary] {'✅' if allowed else '❌'} {event_type}")
+        threading.Thread(
+            target=lambda: asyncio.run(_publish_permission(event_type)),
+            daemon=True,
+        ).start()
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +141,13 @@ def _setup_click_through(window: webview.Window, screen_w: int) -> None:
 # Bus event handling
 # ---------------------------------------------------------------------------
 
+async def _publish_permission(event_type: str) -> None:
+    bus = Bus()
+    await bus.connect()
+    await bus.publish(Event(type=event_type, source="laptop_app", payload={}))
+    await bus.close()
+
+
 async def dispatch(event: Event, window: webview.Window, bus: Bus) -> None:
     if event.type == "show_popup":
         title = event.payload.get("title", "Gary")
@@ -172,6 +187,14 @@ async def dispatch(event: Event, window: webview.Window, bus: Bus) -> None:
                 payload={"error": str(e), "reason": reason},
             ))
 
+    elif event.type == "request_permission":
+        title = event.payload.get("title", "Permission required")
+        description = event.payload.get("description", "")
+        print(f"[gary] 🔐 permission request: {title}")
+        window.evaluate_js(
+            f"gary.showPermission({json.dumps(title)}, {json.dumps(description)})"
+        )
+
     elif event.type == "copy_to_clipboard":
         text = event.payload.get("text", "")
         if text:
@@ -202,7 +225,7 @@ def _run_bus(window: webview.Window) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Window setup
+# Window setup and click-through setup
 # ---------------------------------------------------------------------------
 
 def main() -> None:

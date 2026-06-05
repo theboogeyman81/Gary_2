@@ -34,6 +34,7 @@
     --g-dur-comet:1.9s;     /* temperament: listening light speed  */
     --g-dur-breathe:2.6s;   /* temperament: thinking speed         */
     --g-dur-pulse:1.9s;     /* temperament: pulse speed            */
+    --g-dur-speak:1.2s;     /* temperament: speaking ripple speed  */
   
     --g-radius:14px;        /* cards/modals; buttons are fully round */
     --g-font:"Hanken Grotesk",system-ui,-apple-system,sans-serif;
@@ -261,6 +262,35 @@
     margin-top:20px;padding-top:18px;border-top:1px solid var(--g-line);
   }
   
+  /* ============================================================
+     09 SPEAKING — faster ripple arcs, Gary is talking.
+     ============================================================ */
+  .g-speak{position:absolute;right:0;bottom:0;width:200px;height:200px}
+  .g-speak .g-arc-base{opacity:.3}
+  .g-speak-arc{
+    stroke:var(--g-accent);stroke-width:var(--g-arc-weight);opacity:.1;
+    animation:g-ripple var(--g-dur-speak) var(--g-ease-calm) infinite;
+  }
+  .g-speak-arc.a2{animation-delay:.22s}
+  .g-speak-arc.a3{animation-delay:.44s}
+  @keyframes g-ripple{0%,100%{opacity:.08}40%{opacity:.65}}
+
+  .g-dot--speak{
+    animation-duration:var(--g-dur-speak);
+    background:var(--g-accent);
+  }
+
+  /* ============================================================
+     10 SPACE HOLD — arc fills as user holds spacebar (0→1).
+     ============================================================ */
+  .g-hold{position:absolute;right:0;bottom:0;width:200px;height:200px}
+  .g-arc-fill{
+    stroke:var(--g-accent);stroke-width:2.5px;
+    stroke-dasharray:0 314.16;stroke-dashoffset:0;stroke-linecap:round;
+    filter:drop-shadow(0 0 var(--g-glow-blur) var(--g-accent-soft));
+    transition:stroke-dasharray .1s linear;
+  }
+
   @media (prefers-reduced-motion:reduce){
     .g-overlay *{animation-duration:.001ms!important;transition-duration:.001ms!important}
   }

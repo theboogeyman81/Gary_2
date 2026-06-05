@@ -7,10 +7,13 @@ requires-python = ">=3.11"
 dependencies = [
     "aiohttp>=3.13.5",
     "aiosqlite>=0.22.1",
+    "livekit>=1.1.8",
+    "livekit-agents[cartesia,deepgram,elevenlabs,google,silero]>=1.0",
     "mss>=10.2.0",
     "pillow>=12.2.0",
     "pydantic>=2.13.3",
     "pydantic-ai>=1.89.0",
+    "pynput>=1.8.2",
     "pyqt6>=6.11.0",
     "python-dotenv>=1.2.2",
     "pywebview>=6.2.1",

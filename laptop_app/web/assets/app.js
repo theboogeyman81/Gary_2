@@ -39,6 +39,81 @@ function indicatorHTML() {
 </div>`.trim();
 }
 
+// Builds the listening-state markup.
+// The base arc dims to 18% (via .g-listen .g-arc-base rule in gary.css) and a
+// comet of light travels along the arc path indefinitely.
+function listeningHTML() {
+  return `
+<div class="g-listen">
+  <div class="g-status-label">
+    <span class="g-eyebrow">listening<span class="g-dot"></span></span>
+  </div>
+  <svg class="g-arc" viewBox="0 0 200 200" aria-label="Listening">
+    <path class="g-arc-base" d="M0 200 A200 200 0 0 1 200 0" />
+    <path class="g-arc-comet" d="M0 200 A200 200 0 0 1 200 0" />
+  </svg>
+</div>`.trim();
+}
+
+// Builds the thinking-state markup.
+// Three concentric arcs (radii 200 / 150 / 100) breathe with staggered delays
+// so the pulse appears to ripple outward from the corner.
+function thinkingHTML() {
+  return `
+<div class="g-think">
+  <svg class="g-arc" viewBox="0 0 200 200" aria-label="Thinking">
+    <path class="g-arc-base" d="M0 200 A200 200 0 0 1 200 0" />
+    <path class="g-think-arc"    d="M0 200 A200 200 0 0 1 200 0" />
+    <path class="g-think-arc a2" d="M50 200 A150 150 0 0 1 200 50" />
+    <path class="g-think-arc a3" d="M100 200 A100 100 0 0 1 200 100" />
+  </svg>
+</div>`.trim();
+}
+
+// Builds the speaking-state markup.
+// Faster ripple arcs (1.2s) than thinking (2.6s) — Gary is talking.
+function speakingHTML() {
+  return `
+<div class="g-speak">
+  <div class="g-status-label">
+    <span class="g-eyebrow">speaking<span class="g-dot g-dot--speak"></span></span>
+  </div>
+  <svg class="g-arc" viewBox="0 0 200 200" aria-label="Speaking">
+    <path class="g-arc-base" d="M0 200 A200 200 0 0 1 200 0" />
+    <path class="g-speak-arc"    d="M0 200 A200 200 0 0 1 200 0" />
+    <path class="g-speak-arc a2" d="M50 200 A150 150 0 0 1 200 50" />
+    <path class="g-speak-arc a3" d="M100 200 A100 100 0 0 1 200 100" />
+  </svg>
+</div>`.trim();
+}
+
+// Builds toast markup. The check circle + SVG checkmark are from gary.css's
+// .g-toast-check spec. is-in starts the entrance animation immediately.
+function toastHTML(message) {
+  return `
+<div class="g-toast is-in">
+  <div class="g-toast-check">
+    <svg viewBox="0 0 9 9"><polyline points="1.5,4.5 3.5,6.5 7.5,2.5" /></svg>
+  </div>
+  <span>${escapeHTML(message)}</span>
+</div>`.trim();
+}
+
+// Builds the permission modal markup.
+// Deny is a ghost button; Allow is the accent pill — same hierarchy as gary.css spec.
+function modalHTML(title, description) {
+  return `
+<div class="g-modal g-rise g-fade">
+  <div class="g-eyebrow">Permission request</div>
+  <h3>${escapeHTML(title)}</h3>
+  <p>${escapeHTML(description)}</p>
+  <div class="g-modal-foot">
+    <button class="g-ghost" id="gary-deny">Deny</button>
+    <button class="g-pill"  id="gary-allow">Allow</button>
+  </div>
+</div>`.trim();
+}
+
 // Builds the card markup for a given title and body text.
 // data-h triggers the fixed-height rule in gary.css (.g-card[data-h]{height:288px}).
 // g-rise + g-fade play together on enter: slide up 20px while fading in (0.42s).
@@ -89,6 +164,100 @@ window.gary.renderIndicator = function () {
 window.gary.queuePopup = function (title, text) {
   _lastCard = { title, text };
   window.gary.renderIndicator();
+};
+
+// gary.showSpaceHold(progress)
+// Fills the arc proportionally (0.0–1.0) while the user holds spacebar.
+// At progress=0 the arc is its normal accent colour; as it fills it brightens.
+// Python calls this every 100ms during the 5s hold. Release before 1.0
+// resets to idle.
+window.gary.showSpaceHold = function (progress) {
+  var pct = Math.max(0, Math.min(1, progress));
+
+  // First call: inject the hold element if it's not already there.
+  var el = overlay().querySelector('.g-hold');
+  if (!el) {
+    overlay().innerHTML = `
+<div class="g-hold">
+  <svg class="g-arc" viewBox="0 0 200 200" aria-hidden="true">
+    <path class="g-arc-base" d="M0 200 A200 200 0 0 1 200 0" />
+    <path class="g-arc-fill" d="M0 200 A200 200 0 0 1 200 0" />
+  </svg>
+</div>`.trim();
+    el = overlay().querySelector('.g-hold');
+  }
+
+  // Arc quarter-circle total path length ≈ π/2 × 200 ≈ 314.16
+  var totalLen = 314.16;
+  var fill = overlay().querySelector('.g-arc-fill');
+  if (fill) {
+    fill.style.strokeDasharray  = (pct * totalLen) + ' ' + totalLen;
+    fill.style.strokeDashoffset = '0';
+  }
+};
+
+// gary.showSpeaking()
+// Switches the overlay to the speaking arc state — a faster ripple than
+// "thinking", indicating Gary is talking.
+window.gary.showSpeaking = function () {
+  overlay().innerHTML = speakingHTML();
+};
+
+// gary.showListening()
+// Switches the overlay to the listening arc state.
+// Python calls this when the microphone opens. No interaction — Python drives
+// the transition out by calling queuePopup() or renderIndicator().
+window.gary.showListening = function () {
+  overlay().innerHTML = listeningHTML();
+};
+
+// gary.showThinking()
+// Switches the overlay to the thinking arc state.
+// Python calls this while the agent is processing. Same lifecycle as showListening.
+window.gary.showThinking = function () {
+  overlay().innerHTML = thinkingHTML();
+};
+
+// gary.showToast(message, duration)
+// Appends a self-dismissing toast over the current state (does not replace it).
+// duration defaults to 3000 ms. Python calls this for lightweight confirmations
+// like "Screenshot taken" or "Copied to clipboard".
+window.gary.showToast = function (message, duration) {
+  duration = duration || 3000;
+
+  const tmp = document.createElement('div');
+  tmp.innerHTML = toastHTML(message);
+  const toast = tmp.firstChild;
+  overlay().appendChild(toast);
+
+  setTimeout(function () {
+    toast.classList.replace('is-in', 'is-out');
+    // 300 ms > the 260 ms out animation so the element is gone before removal.
+    setTimeout(function () {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 300);
+  }, duration);
+};
+
+// gary.showPermission(title, description)
+// Replaces the overlay with the permission modal. Allow/Deny route through the
+// Python bridge so the agent gets the answer back on the bus.
+window.gary.showPermission = function (title, description) {
+  overlay().innerHTML = modalHTML(title, description);
+
+  overlay().querySelector('#gary-allow').addEventListener('click', function () {
+    if (window.pywebview) {
+      pywebview.api.permission_response(true);
+    }
+    window.gary.renderIndicator();
+  });
+
+  overlay().querySelector('#gary-deny').addEventListener('click', function () {
+    if (window.pywebview) {
+      pywebview.api.permission_response(false);
+    }
+    window.gary.renderIndicator();
+  });
 };
 
 // gary.renderCard(title, text)
