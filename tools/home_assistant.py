@@ -50,17 +50,18 @@ async def get_bulb_state() -> str | None:
     return result.get("state")
 
 
-async def control_bulb(action: str, bus: Bus) -> str:
+async def control_bulb(action: str, bus: Bus, area: str | None = None) -> str:
     """
-    Control the bulb. action must be 'on', 'off', or 'toggle'.
-    
-    Use this when the user asks about lights, lamps, or the bulb.
+    Control lights. action must be 'on', 'off', or 'toggle'.
+    area is an optional room name (e.g. 'my_room', 'bedroom', 'living_room', 'kitchen').
+    If no area is given, falls back to the default ENTITY_ID from config.
+
     Examples:
       - "turn on the lights" → action='on'
-      - "turn off the bulb" → action='off'
-      - "toggle the lamp" → action='toggle'
+      - "turn off my room lights" → action='off', area='my_room'
+      - "toggle the bedroom" → action='toggle', area='bedroom'
     """
-    # Handle toggle by checking state first.
+    # Handle toggle: check state of the default entity (area toggles aren't state-queryable easily)
     if action == "toggle":
         state = await get_bulb_state()
         if state == "on":
@@ -68,26 +69,32 @@ async def control_bulb(action: str, bus: Bus) -> str:
         elif state == "off":
             action = "on"
         else:
-            return f"Couldn't determine bulb state to toggle."
+            return "Couldn't determine light state to toggle."
 
-    # Now action is 'on' or 'off'.
     if action not in ("on", "off"):
         return f"Invalid action: {action}. Must be 'on', 'off', or 'toggle'."
 
+    # Build payload — prefer area_id if provided, else fall back to entity_id.
+    if area:
+        payload = {"area_id": area}
+        target_label = f"area:{area}"
+    else:
+        payload = {"entity_id": ENTITY_ID}
+        target_label = ENTITY_ID
+
     path = f"/api/services/light/turn_{action}"
-    result = await _ha_request("POST", path, json_body={"entity_id": ENTITY_ID})
+    result = await _ha_request("POST", path, json_body=payload)
 
     if result is not None:
-        # Publish a confirmation event for visibility on the bus.
         await bus.publish(Event(
             type="device_action",
             source="agent",
             payload={
-                "device": ENTITY_ID,
+                "device": target_label,
                 "action": action,
                 "result": "success",
             },
         ))
-        return f"Bulb turned {action}."
+        return f"Lights in {area or target_label} turned {action}."
     else:
-        return f"Failed to turn bulb {action}."
+        return f"Failed to turn lights {action}."

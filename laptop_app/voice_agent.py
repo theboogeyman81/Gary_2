@@ -18,13 +18,15 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from typing import Annotated
 
 from dotenv import load_dotenv
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli
+from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli, function_tool
 from livekit.plugins import cartesia, deepgram, google, silero
 
 from bus.redis_bus import Bus
 from events.schema import Event
+from tools.home_assistant import control_bulb
 
 # Load .env from project root — worker subprocesses may not inherit shell env.
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -49,7 +51,7 @@ _STATE_TO_BUS = {
 
 
 class GaryVoiceAgent(Agent):
-    def __init__(self) -> None:
+    def __init__(self, bus: Bus) -> None:
         super().__init__(
             instructions=GARY_SYSTEM_PROMPT,
             stt=deepgram.STT(model="nova-3"),
@@ -64,6 +66,16 @@ class GaryVoiceAgent(Agent):
                 api_key=os.getenv("CARTESIA_API_KEY"),
             ),
         )
+        self._bus = bus
+
+    @function_tool
+    async def control_lights(
+        self,
+        action: Annotated[str, "Action to perform: 'on', 'off', or 'toggle'"],
+    ) -> str:
+        """Turn the lights on, off, or toggle them. Use this for any request about lights, room lighting, or brightness."""
+        logger.info("[gary-voice] control_lights: action=%s", action)
+        return await control_bulb(action, self._bus, area=None)
 
 
 async def entrypoint(ctx: JobContext) -> None:
@@ -96,7 +108,7 @@ async def entrypoint(ctx: JobContext) -> None:
             asyncio.create_task(_pub(bus_type))
             logger.info("[gary-voice] state → %s", ev.new_state)
 
-    await session.start(GaryVoiceAgent(), room=ctx.room)
+    await session.start(GaryVoiceAgent(bus=bus), room=ctx.room)
     logger.info("[gary-voice] Session started")
 
     # LiveKit 1.5 removed Room.wait_for_disconnect(); wait on the event instead.

@@ -89,9 +89,11 @@ async def copy_to_clipboard(ctx: RunContext[GaryDeps], text: str) -> str:
 
 
 @agent.tool
-async def control_bulb(ctx: RunContext[GaryDeps], action: str) -> str:
-    """Control the smart bulb. action must be 'on', 'off', or 'toggle'."""
-    return await control_bulb_impl(action, ctx.deps.bus) 
+async def control_bulb(ctx: RunContext[GaryDeps], action: str, area: str | None = None) -> str:
+    """Control lights. action must be 'on', 'off', or 'toggle'.
+    area is the room name: 'my_room', 'bedroom', 'living_room', 'kitchen'.
+    If the user mentions a room, always pass the area. Otherwise leave it None."""
+    return await control_bulb_impl(action, ctx.deps.bus, area)
 
 
 @agent.tool
