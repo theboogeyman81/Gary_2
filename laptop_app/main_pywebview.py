@@ -53,6 +53,7 @@ class PythonAPI:
         ).start()
 
 
+
 # ---------------------------------------------------------------------------
 # Click-through: let the desktop show through transparent areas
 # ---------------------------------------------------------------------------
@@ -287,3 +288,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+
+

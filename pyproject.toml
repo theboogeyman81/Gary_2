@@ -20,4 +20,9 @@ dependencies = [
     "qasync>=0.28.0",
     "redis>=7.4.0",
     "websockets>=16.0",
+    "ultralytics>=8.0.0",
+    "opencv-python>=4.8.0",
+    "mediapipe>=0.10.0",
+    "pyyaml>=6.0",
+    "numpy>=1.24.0",
 ]

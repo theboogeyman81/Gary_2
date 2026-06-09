@@ -23,14 +23,33 @@ async def handle_speech(event: Event, deps: GaryDeps) -> None:
     text = event.payload.get("text", "")
     if not text:
         return
-    
+
     print(f"[main_loop] User said: {text!r}")
-    
+
     # Run the agent. It will think and call tools (like speak).
     # Tools publish events back to the bus on their own.
     result = await agent.run(text, deps=deps)
-    
+
     print(f"[main_loop] Agent done. Final output: {result.output!r}")
+
+
+async def handle_gesture_command(event: Event, deps: GaryDeps) -> None:
+    """Handle a gesture_command event — synthesize a prompt and run the agent."""
+    friendly_name = event.payload.get("friendly_name", "unknown device")
+    area = event.payload.get("area", "")
+    entity_id = event.payload.get("device_id", "")
+
+    # Give the LLM enough context to call control_bulb with the right area.
+    # area is not in the gesture_command payload (correlator doesn't know it),
+    # so we include the entity_id as a fallback hint.
+    synthetic = (
+        f"[gesture] The user pinched while looking at the {friendly_name}. "
+        f"Toggle it. HA entity: {entity_id}."
+    )
+    print(f"[main_loop] Gesture command: {entity_id} ({friendly_name})")
+
+    result = await agent.run(synthetic, deps=deps)
+    print(f"[main_loop] Gesture agent done: {result.output!r}")
 
 
 async def main():
@@ -51,7 +70,8 @@ async def main():
             # For now: speech events.
             if event.type == "speech":
                 await handle_speech(event, deps)
-            # Other event types we ignore for now.
+            elif event.type == "gesture_command":
+                await handle_gesture_command(event, deps)
     except KeyboardInterrupt:
         pass
     finally:

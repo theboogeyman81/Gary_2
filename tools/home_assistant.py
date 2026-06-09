@@ -50,16 +50,24 @@ async def get_bulb_state() -> str | None:
     return result.get("state")
 
 
-async def control_bulb(action: str, bus: Bus, area: str | None = None) -> str:
+async def control_bulb(
+    action: str,
+    bus: Bus,
+    area: str | None = None,
+    entity_id: str | None = None,
+) -> str:
     """
     Control lights. action must be 'on', 'off', or 'toggle'.
-    area is an optional room name (e.g. 'my_room', 'bedroom', 'living_room', 'kitchen').
-    If no area is given, falls back to the default ENTITY_ID from config.
+
+    Target priority: entity_id > area > default ENTITY_ID from config.
+      entity_id: a specific HA entity (e.g. 'light.bedroom_lamp') — used by gesture pipeline
+      area: an HA area_id (e.g. 'bedroom') — used for voice commands like "bedroom lights"
+      (neither): falls back to the ENTITY_ID env var
 
     Examples:
       - "turn on the lights" → action='on'
       - "turn off my room lights" → action='off', area='my_room'
-      - "toggle the bedroom" → action='toggle', area='bedroom'
+      - gesture toggle → action='toggle', entity_id='light.bedroom_lamp'
     """
     # Handle toggle: check state of the default entity (area toggles aren't state-queryable easily)
     if action == "toggle":
@@ -74,8 +82,11 @@ async def control_bulb(action: str, bus: Bus, area: str | None = None) -> str:
     if action not in ("on", "off"):
         return f"Invalid action: {action}. Must be 'on', 'off', or 'toggle'."
 
-    # Build payload — prefer area_id if provided, else fall back to entity_id.
-    if area:
+    # Build payload — entity_id > area > default ENTITY_ID
+    if entity_id:
+        payload = {"entity_id": entity_id}
+        target_label = entity_id
+    elif area:
         payload = {"area_id": area}
         target_label = f"area:{area}"
     else:
@@ -95,6 +106,6 @@ async def control_bulb(action: str, bus: Bus, area: str | None = None) -> str:
                 "result": "success",
             },
         ))
-        return f"Lights in {area or target_label} turned {action}."
+        return f"Lights ({target_label}) turned {action}."
     else:
         return f"Failed to turn lights {action}."
