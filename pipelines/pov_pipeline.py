@@ -24,6 +24,7 @@ from bus.redis_bus import Bus
 from config.settings import (
     CENTERED_REGION_FRACTION,
     POV_CAMERA_SOURCE,
+    SHOW_CAMERA,
     STABILITY_FRAMES_ENTER,
     STABILITY_FRAMES_LEAVE,
     YOLO_CONFIDENCE_THRESHOLD,
@@ -112,9 +113,21 @@ def _detect_yolo(
 
 async def run(bus: Bus) -> None:
     aruco_devices, yolo_devices = _load_registry()
+
+    # Open camera concurrently while YOLO loads — both take several seconds on first run,
+    # and starting them together prevents macOS from getting confused by sequential opens.
+    cam = make_camera_source(POV_CAMERA_SOURCE)
+    open_task = asyncio.create_task(cam.open())
     model = await asyncio.to_thread(YOLO, YOLO_MODEL)
     print(f"[pov_pipeline] Loaded YOLO model: {YOLO_MODEL}")
     print(f"[pov_pipeline] Registry: {len(aruco_devices)} ArUco, {len(yolo_devices)} YOLO devices")
+    print(f"[pov_pipeline] Waiting for camera {POV_CAMERA_SOURCE} ...")
+    try:
+        await asyncio.wait_for(open_task, timeout=12.0)
+    except asyncio.TimeoutError:
+        await cam.close()
+        raise RuntimeError(f"Camera {POV_CAMERA_SOURCE} warmup timed out — is it in use by another process?")
+    print(f"[pov_pipeline] Camera ready")
 
     all_device_ids: set[str] = set()
     for d in aruco_devices.values():
@@ -127,10 +140,15 @@ async def run(bus: Bus) -> None:
     leave_counters: dict[str, int] = {did: 0 for did in all_device_ids}
 
     backoff = 1.0
-    cam = make_camera_source(POV_CAMERA_SOURCE)
+    if SHOW_CAMERA:
+        cv2.namedWindow("pov pipeline", cv2.WINDOW_NORMAL)
 
+    first_frame = True
     try:
         async for frame in cam.frames():
+            if first_frame:
+                print(f"[pov_pipeline] First frame: {frame.shape}")
+                first_frame = False
             backoff = 1.0
             fh, fw = frame.shape[:2]
 
@@ -184,6 +202,24 @@ async def run(bus: Bus) -> None:
                             ))
                             print(f"[pov_pipeline] device_left_view: {did}")
 
+            if SHOW_CAMERA:
+                display = frame.copy()
+                # Draw centered region boundary
+                mx = int(fw * (1 - CENTERED_REGION_FRACTION) / 2)
+                my = int(fh * (1 - CENTERED_REGION_FRACTION) / 2)
+                cv2.rectangle(display, (mx, my), (fw - mx, fh - my), (80, 80, 80), 1)
+                # Draw all detections (green = in view, orange = detected but not in view yet)
+                for device, bbox, conf, method in all_detections:
+                    did = device["ha_entity_id"]
+                    x, y, w, h = bbox
+                    color = (0, 220, 0) if in_view[did] else (0, 140, 255)
+                    cv2.rectangle(display, (x, y), (x + w, y + h), color, 2)
+                    frames_label = f"+{enter_counters[did]}" if not in_view[did] else "IN VIEW"
+                    label = f"{device['friendly_name']} {conf:.2f} [{method}] {frames_label}"
+                    cv2.putText(display, label, (x, max(y - 6, 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
+                cv2.imshow("pov pipeline", display)
+                cv2.waitKey(10)
+
     except Exception as exc:
         print(f"[pov_pipeline] Camera error: {exc}. Retrying in {backoff:.0f}s ...")
         await bus.publish(Event(
@@ -192,6 +228,8 @@ async def run(bus: Bus) -> None:
             payload={"error": str(exc)},
         ))
         await cam.close()
+        if SHOW_CAMERA:
+            cv2.destroyWindow("pov pipeline")
         await asyncio.sleep(backoff)
         backoff = min(backoff * 2, 30.0)
 
@@ -216,4 +254,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        if SHOW_CAMERA:
+            cv2.destroyAllWindows()
