@@ -16,6 +16,7 @@ from bus.redis_bus import Bus
 from events.schema import Event
 from agent.gary_agent import agent, GaryDeps
 from memory.store import init_db
+from tools.home_assistant import control_bulb as control_bulb_impl
 
 
 async def handle_speech(event: Event, deps: GaryDeps) -> None:
@@ -23,14 +24,23 @@ async def handle_speech(event: Event, deps: GaryDeps) -> None:
     text = event.payload.get("text", "")
     if not text:
         return
-    
+
     print(f"[main_loop] User said: {text!r}")
-    
+
     # Run the agent. It will think and call tools (like speak).
     # Tools publish events back to the bus on their own.
     result = await agent.run(text, deps=deps)
-    
+
     print(f"[main_loop] Agent done. Final output: {result.output!r}")
+
+
+async def handle_gesture_command(event: Event, deps: GaryDeps) -> None:
+    """Handle a gesture_command — directly toggle the device, no LLM needed."""
+    entity_id = event.payload.get("device_id", "")
+    friendly_name = event.payload.get("friendly_name", entity_id)
+    print(f"[main_loop] Gesture toggle: {entity_id} ({friendly_name})")
+    result = await control_bulb_impl("toggle", deps.bus, entity_id=entity_id)
+    print(f"[main_loop] HA result: {result}")
 
 
 async def main():
@@ -51,7 +61,8 @@ async def main():
             # For now: speech events.
             if event.type == "speech":
                 await handle_speech(event, deps)
-            # Other event types we ignore for now.
+            elif event.type == "gesture_command":
+                await handle_gesture_command(event, deps)
     except KeyboardInterrupt:
         pass
     finally:

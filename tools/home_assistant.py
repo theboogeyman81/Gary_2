@@ -42,28 +42,38 @@ async def _ha_request(method: str, path: str, json_body: dict | None = None) -> 
         return None
 
 
-async def get_bulb_state() -> str | None:
-    """Get the current state of the bulb ('on' or 'off')."""
-    result = await _ha_request("GET", f"/api/states/{ENTITY_ID}")
+async def get_bulb_state(target_entity_id: str | None = None) -> str | None:
+    """Get the current state of an entity ('on' or 'off'). Defaults to ENTITY_ID from config."""
+    eid = target_entity_id or ENTITY_ID
+    result = await _ha_request("GET", f"/api/states/{eid}")
     if result is None:
         return None
     return result.get("state")
 
 
-async def control_bulb(action: str, bus: Bus, area: str | None = None) -> str:
+async def control_bulb(
+    action: str,
+    bus: Bus,
+    area: str | None = None,
+    entity_id: str | None = None,
+) -> str:
     """
     Control lights. action must be 'on', 'off', or 'toggle'.
-    area is an optional room name (e.g. 'my_room', 'bedroom', 'living_room', 'kitchen').
-    If no area is given, falls back to the default ENTITY_ID from config.
+
+    Target priority: entity_id > area > default ENTITY_ID from config.
+      entity_id: a specific HA entity (e.g. 'light.smart_bulb_12_5w_2') — used by gesture pipeline
+      area: an HA area_id (e.g. 'bedroom') — used for voice commands like "bedroom lights"
+      (neither): falls back to the ENTITY_ID env var
 
     Examples:
       - "turn on the lights" → action='on'
       - "turn off my room lights" → action='off', area='my_room'
-      - "toggle the bedroom" → action='toggle', area='bedroom'
+      - gesture toggle → action='toggle', entity_id='light.smart_bulb_12_5w_2'
     """
-    # Handle toggle: check state of the default entity (area toggles aren't state-queryable easily)
+    # Resolve the target entity first so toggle queries the right state.
+    resolved_entity = entity_id or ENTITY_ID
     if action == "toggle":
-        state = await get_bulb_state()
+        state = await get_bulb_state(resolved_entity)
         if state == "on":
             action = "off"
         elif state == "off":
@@ -74,13 +84,16 @@ async def control_bulb(action: str, bus: Bus, area: str | None = None) -> str:
     if action not in ("on", "off"):
         return f"Invalid action: {action}. Must be 'on', 'off', or 'toggle'."
 
-    # Build payload — prefer area_id if provided, else fall back to entity_id.
-    if area:
+    # Build payload — entity_id > area > default ENTITY_ID
+    if entity_id:
+        payload = {"entity_id": entity_id}
+        target_label = entity_id
+    elif area:
         payload = {"area_id": area}
         target_label = f"area:{area}"
     else:
-        payload = {"entity_id": ENTITY_ID}
-        target_label = ENTITY_ID
+        payload = {"entity_id": resolved_entity}
+        target_label = resolved_entity
 
     path = f"/api/services/light/turn_{action}"
     result = await _ha_request("POST", path, json_body=payload)
@@ -95,6 +108,6 @@ async def control_bulb(action: str, bus: Bus, area: str | None = None) -> str:
                 "result": "success",
             },
         ))
-        return f"Lights in {area or target_label} turned {action}."
+        return f"Lights ({target_label}) turned {action}."
     else:
         return f"Failed to turn lights {action}."

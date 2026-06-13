@@ -1,0 +1,29 @@
+# Gary device registry — single source of truth for gesture + HA tool.
+#
+# Each entry:
+#   ha_entity_id:   Home Assistant entity ID (used by tools/home_assistant.py)
+#   friendly_name:  Human-readable name shown in speak/popup events
+#   area:           HA area_id (used when control_bulb falls back to area routing)
+#   vision:
+#     method:       "aruco" or "yolo"
+#     aruco_id:     ArUco marker ID stuck on the device (if method == aruco)
+#     yolo_class:   COCO class name (if method == yolo, e.g. "tv", "laptop")
+#
+# Print an ArUco marker: https://chev.me/arucogen/ — use dictionary DICT_4X4_50.
+
+devices:
+  - ha_entity_id: light.smart_bulb_12_5w_2
+    friendly_name: smart bulb
+    area: bedroom
+    vision:
+      method: aruco
+      aruco_id: 3
+      yolo_class: null
+
+  - ha_entity_id: media_player.living_room_tv
+    friendly_name: living room TV
+    area: living_room
+    vision:
+      method: yolo
+      yolo_class: tv
+      aruco_id: null
