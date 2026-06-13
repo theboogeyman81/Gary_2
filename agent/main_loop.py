@@ -16,6 +16,7 @@ from bus.redis_bus import Bus
 from events.schema import Event
 from agent.gary_agent import agent, GaryDeps
 from memory.store import init_db
+from tools.home_assistant import control_bulb as control_bulb_impl
 
 
 async def handle_speech(event: Event, deps: GaryDeps) -> None:
@@ -34,22 +35,12 @@ async def handle_speech(event: Event, deps: GaryDeps) -> None:
 
 
 async def handle_gesture_command(event: Event, deps: GaryDeps) -> None:
-    """Handle a gesture_command event — synthesize a prompt and run the agent."""
-    friendly_name = event.payload.get("friendly_name", "unknown device")
-    area = event.payload.get("area", "")
+    """Handle a gesture_command — directly toggle the device, no LLM needed."""
     entity_id = event.payload.get("device_id", "")
-
-    # Give the LLM enough context to call control_bulb with the right area.
-    # area is not in the gesture_command payload (correlator doesn't know it),
-    # so we include the entity_id as a fallback hint.
-    synthetic = (
-        f"[gesture] The user pinched while looking at the {friendly_name}. "
-        f"Toggle it. HA entity: {entity_id}."
-    )
-    print(f"[main_loop] Gesture command: {entity_id} ({friendly_name})")
-
-    result = await agent.run(synthetic, deps=deps)
-    print(f"[main_loop] Gesture agent done: {result.output!r}")
+    friendly_name = event.payload.get("friendly_name", entity_id)
+    print(f"[main_loop] Gesture toggle: {entity_id} ({friendly_name})")
+    result = await control_bulb_impl("toggle", deps.bus, entity_id=entity_id)
+    print(f"[main_loop] HA result: {result}")
 
 
 async def main():

@@ -26,8 +26,9 @@ from bus.redis_bus import Bus
 from config.settings import (
     CENTERED_REGION_FRACTION,
     HAND_CAMERA_SOURCE,
-    PINCH_HOLD_FRAMES,
-    PINCH_THRESHOLD,
+    PINCH_ENTER_THRESHOLD,
+    PINCH_EXIT_THRESHOLD,
+    PINCH_HOLD_DURATION,
     POV_CAMERA_SOURCE,
     SHOW_CAMERA,
     STABILITY_FRAMES_ENTER,
@@ -50,6 +51,21 @@ _MODEL_URL = (
 _MODEL_PATH = Path(__file__).parent.parent / "hand_landmarker.task"
 _THUMB_TIP = 4
 _INDEX_TIP = 8
+_WRIST = 0
+_MIDDLE_MCP = 9
+_EMA_ALPHA = 0.3  # higher = faster response, lower = heavier smoothing
+
+
+def _hand_size(lm) -> float:
+    return math.hypot(lm[_WRIST].x - lm[_MIDDLE_MCP].x,
+                      lm[_WRIST].y - lm[_MIDDLE_MCP].y)
+
+
+def _pinch_dist_normalized(lm) -> float:
+    size = _hand_size(lm)
+    raw = math.hypot(lm[_THUMB_TIP].x - lm[_INDEX_TIP].x,
+                     lm[_THUMB_TIP].y - lm[_INDEX_TIP].y)
+    return raw / size if size > 0 else raw
 
 
 def _ensure_model() -> None:
@@ -63,7 +79,7 @@ def _ensure_model() -> None:
 class _PinchState(Enum):
     OPEN = auto()
     HOLDING = auto()
-    FIRED = auto()
+    WAITING_RELEASE = auto()
 
 
 async def _run_pov(bus: Bus, model: YOLO, cam: CameraSource) -> None:
@@ -166,11 +182,13 @@ async def _run_hand(
     bus: Bus, landmarker: mp.tasks.vision.HandLandmarker, cam: CameraSource
 ) -> None:
     state = _PinchState.OPEN
-    hold_counter = 0
-    start_time = time.monotonic()
+    pinch_start: float | None = None
+    ema_dist: float | None = None
+    loop_start = time.monotonic()
 
     async for frame in cam.frames():
-        timestamp_ms = int((time.monotonic() - start_time) * 1000)
+        now = time.monotonic()
+        timestamp_ms = int((now - loop_start) * 1000)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
         result = landmarker.detect_for_video(mp_image, timestamp_ms)
@@ -181,60 +199,75 @@ async def _run_hand(
 
         if result.hand_landmarks:
             lm = result.hand_landmarks[0]
-            dist = math.hypot(
-                lm[_THUMB_TIP].x - lm[_INDEX_TIP].x,
-                lm[_THUMB_TIP].y - lm[_INDEX_TIP].y,
-            )
+            dist = _pinch_dist_normalized(lm)
             if result.handedness:
                 hand_label = result.handedness[0][0].display_name.lower()
                 confidence = result.handedness[0][0].score
 
+        # EMA smoothing — stabilises the normalized distance before the state machine sees it
         if dist is None:
-            if state in (_PinchState.HOLDING, _PinchState.FIRED):
-                state = _PinchState.OPEN
-                hold_counter = 0
+            ema_dist = None
+        elif ema_dist is None:
+            ema_dist = dist
+        else:
+            ema_dist = _EMA_ALPHA * dist + (1 - _EMA_ALPHA) * ema_dist
+
+        # State machine — time-based hold, hysteresis thresholds
+        if ema_dist is None:
+            state = _PinchState.OPEN
+            pinch_start = None
         elif state == _PinchState.OPEN:
-            if dist <= PINCH_THRESHOLD:
+            if ema_dist <= PINCH_ENTER_THRESHOLD:
                 state = _PinchState.HOLDING
-                hold_counter = 1
-                print(f"[dual/hand] Pinch started (dist={dist:.3f})")
+                pinch_start = now
+                print(f"[dual/hand] Pinch started (ema={ema_dist:.3f})")
         elif state == _PinchState.HOLDING:
-            if dist <= PINCH_THRESHOLD:
-                hold_counter += 1
-                if hold_counter >= PINCH_HOLD_FRAMES:
-                    await bus.publish(Event(
-                        type="pinch_detected",
-                        source="hand_pipeline",
-                        payload={"confidence": round(float(confidence), 3), "hand": hand_label},
-                    ))
-                    print(f"[dual/hand] pinch_detected ({hand_label}, conf={confidence:.2f})")
-                    state = _PinchState.FIRED
-            else:
+            if ema_dist > PINCH_EXIT_THRESHOLD:
                 state = _PinchState.OPEN
-                hold_counter = 0
-        elif state == _PinchState.FIRED:
-            if dist > PINCH_THRESHOLD:
+                pinch_start = None
+            elif now - pinch_start >= PINCH_HOLD_DURATION:
+                await bus.publish(Event(
+                    type="pinch_detected",
+                    source="hand_pipeline",
+                    payload={"confidence": round(float(confidence), 3), "hand": hand_label},
+                ))
+                print(f"[dual/hand] pinch_detected ({hand_label}, conf={confidence:.2f})")
+                state = _PinchState.WAITING_RELEASE
+        elif state == _PinchState.WAITING_RELEASE:
+            if ema_dist > PINCH_EXIT_THRESHOLD:
                 state = _PinchState.OPEN
-                hold_counter = 0
+                pinch_start = None
                 print("[dual/hand] Pinch released — re-armed")
 
         if SHOW_CAMERA:
             display = frame.copy()
             h, w = display.shape[:2]
-            if result.hand_landmarks:
+            state_colors = {
+                _PinchState.OPEN: (200, 200, 200),
+                _PinchState.HOLDING: (0, 200, 255),
+                _PinchState.WAITING_RELEASE: (0, 0, 255),
+            }
+            color = state_colors[state]
+            if result.hand_landmarks and ema_dist is not None:
                 lm = result.hand_landmarks[0]
                 tx, ty = int(lm[_THUMB_TIP].x * w), int(lm[_THUMB_TIP].y * h)
                 ix, iy = int(lm[_INDEX_TIP].x * w), int(lm[_INDEX_TIP].y * h)
-                color = (
-                    (0, 255, 0) if state == _PinchState.OPEN
-                    else (0, 165, 255) if state == _PinchState.HOLDING
-                    else (0, 0, 255)
-                )
                 cv2.circle(display, (tx, ty), 10, (0, 255, 0), -1)
                 cv2.circle(display, (ix, iy), 10, (0, 0, 255), -1)
                 cv2.line(display, (tx, ty), (ix, iy), color, 2)
-                cv2.putText(display, f"{state.name} d={dist:.3f}", (10, 30),
+                cv2.putText(display, f"{state.name} d={ema_dist:.3f}", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                # Progress bar — visible only while holding
+                if state == _PinchState.HOLDING and pinch_start is not None:
+                    progress = min((now - pinch_start) / PINCH_HOLD_DURATION, 1.0)
+                    bar_x, bar_y, bar_w, bar_h = 10, h - 40, 300, 20
+                    cv2.rectangle(display, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (50, 50, 50), -1)
+                    filled = int(bar_w * progress)
+                    bar_color = (0, 255, 0) if progress >= 1.0 else (0, 200, 255)
+                    cv2.rectangle(display, (bar_x, bar_y), (bar_x + filled, bar_y + bar_h), bar_color, -1)
+                    cv2.rectangle(display, (bar_x, bar_y), (bar_x + bar_w, bar_y + bar_h), (255, 255, 255), 1)
+                    cv2.putText(display, f"{int(progress * 100)}%", (bar_x + bar_w + 8, bar_y + 15),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
             else:
                 cv2.putText(display, "no hand", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (60, 60, 60), 2)

@@ -12,8 +12,8 @@
 # Print an ArUco marker: https://chev.me/arucogen/ — use dictionary DICT_4X4_50.
 
 devices:
-  - ha_entity_id: light.bedroom_lamp
-    friendly_name: bedroom lamp
+  - ha_entity_id: light.smart_bulb_12_5w_2
+    friendly_name: smart bulb
     area: bedroom
     vision:
       method: aruco
