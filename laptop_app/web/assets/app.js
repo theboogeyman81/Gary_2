@@ -203,6 +203,35 @@ window.gary.showSpeaking = function () {
   overlay().innerHTML = speakingHTML();
 };
 
+// gary.showSpaceHold(progress)
+// Called repeatedly by the spacebar-hold loop in main_pywebview.py (0.0 → 1.0).
+// Draws a progress arc over the indicator — no state replacement, just a second
+// SVG path that fills in. Arc total length for radius 200 quarter-circle ≈ 314 px.
+window.gary.showSpaceHold = function (progress) {
+  const ARC_LEN = 314;
+
+  // Ensure the indicator is present (first call sets it up).
+  if (!overlay().querySelector('.g-indicator')) {
+    window.gary.renderIndicator();
+  }
+
+  let fill = overlay().querySelector('.g-arc-fill');
+  if (!fill) {
+    const svg = overlay().querySelector('.g-arc');
+    fill = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    fill.classList.add('g-arc-fill');
+    fill.setAttribute('d', 'M0 200 A200 200 0 0 1 200 0');
+    fill.setAttribute('fill', 'none');
+    fill.setAttribute('stroke', 'var(--g-accent)');
+    fill.setAttribute('stroke-width', '2.5');
+    fill.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(fill);
+  }
+
+  const filled = Math.max(0, progress) * ARC_LEN;
+  fill.style.strokeDasharray = `${filled} ${ARC_LEN}`;
+};
+
 // gary.showListening()
 // Switches the overlay to the listening arc state.
 // Python calls this when the microphone opens. No interaction — Python drives
@@ -293,6 +322,58 @@ window.gary.renderCard = function (title, text) {
       btn.classList.remove('is-done');
     }, 2000);
   });
+};
+
+// gary.connectMic(url, token)
+// Joins the LiveKit room as a mic-only participant so the voice agent can hear
+// the user. Called by Python right after creating the room on spacebar hold.
+window.gary.connectMic = async function (url, token) {
+  if (window._garyRoom) {
+    await window._garyRoom.disconnect();
+    window._garyRoom = null;
+  }
+  try {
+    const room = new LivekitClient.Room();
+
+    // Attach any remote audio track (Gary's TTS) to a real <audio> element and play it.
+    function attachAudio(track) {
+      const el = track.attach();
+      el.setAttribute('autoplay', '');
+      document.body.appendChild(el);
+      el.play().catch(e => console.warn('[gary] audio play blocked:', e));
+    }
+
+    // Handle tracks that arrive after we join.
+    room.on(LivekitClient.RoomEvent.TrackSubscribed, function (track) {
+      if (track.kind === 'audio') attachAudio(track);
+    });
+
+    await room.connect(url, token);
+
+    // Handle tracks that were already published before we joined.
+    room.remoteParticipants.forEach(function (participant) {
+      participant.trackPublications.forEach(function (pub) {
+        if (pub.track && pub.track.kind === 'audio') attachAudio(pub.track);
+      });
+    });
+
+    await room.localParticipant.setMicrophoneEnabled(true);
+    window._garyRoom = room;
+    console.log('[gary] mic connected to room:', room.name);
+  } catch (err) {
+    console.error('[gary] connectMic failed:', err);
+  }
+};
+
+// gary.disconnectMic()
+// Leaves the LiveKit room and releases the microphone. Called by Python when
+// gary_idle fires on the bus (agent finished speaking).
+window.gary.disconnectMic = async function () {
+  if (window._garyRoom) {
+    await window._garyRoom.disconnect();
+    window._garyRoom = null;
+    console.log('[gary] mic disconnected');
+  }
 };
 
 // --- Boot --------------------------------------------------------------------

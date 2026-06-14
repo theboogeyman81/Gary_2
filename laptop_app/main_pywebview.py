@@ -14,20 +14,32 @@ Run with:
 
 import asyncio
 import json
+import os
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import webview
+from dotenv import load_dotenv
 
 from bus.redis_bus import Bus
 from events.schema import Event
 from laptop_app.screenshot import capture_screen
 
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
+
 
 INDEX_HTML = Path(__file__).parent / "web" / "index.html"
 
-LAPTOP_EVENTS = {"show_popup", "request_screenshot", "copy_to_clipboard", "request_permission"}
+LAPTOP_EVENTS = {
+    # Explicit UI commands (from scripts or other agents)
+    "show_popup", "request_screenshot", "copy_to_clipboard",
+    "request_permission", "show_listening", "show_thinking",
+    "show_toast", "show_idle",
+    # Voice agent state transitions
+    "gary_listening", "gary_thinking", "gary_speaking", "gary_idle",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +84,8 @@ def _setup_click_through(window: webview.Window, screen_w: int) -> None:
     from AppKit import NSApplication, NSColor, NSEvent, NSObject, NSTimer
     from PyObjCTools import AppHelper
 
-    global _hot_zone_monitor
+    global _hot_zone_monitor, _kb_window
+    _kb_window = window
 
     app = NSApplication.sharedApplication()
     ns_window = app.keyWindow() or app.windows()[0]
@@ -132,6 +145,28 @@ def _setup_click_through(window: webview.Window, screen_w: int) -> None:
                 f"[gary] Overlay ready — click-through on, hot zone {HOT_W}×{HOT_H}px",
                 flush=True,
             )
+
+            # Global spacebar monitor — registered on the main run loop so it
+            # doesn't conflict with pywebview. Space key code = 49.
+            # NSEventMaskKeyDown = 1<<10, NSEventMaskKeyUp = 1<<11
+            SPACE = 49
+            NS_KEY_DOWN = 1 << 10
+            NS_KEY_UP   = 1 << 11
+
+            def _handle_key(event):
+                if event.keyCode() == SPACE:
+                    if event.type() == 10 and not event.isARepeat():  # key down, no repeat
+                        _space_pressed()
+                    elif event.type() == 11:  # key up
+                        _space_released()
+
+            global _space_event_monitor
+            _space_event_monitor = NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
+                NS_KEY_DOWN | NS_KEY_UP,
+                _handle_key,
+            )
+            print("[gary] Spacebar listener active (hold 5s to wake Gary)", flush=True)
+
         except Exception as e:
             print(f"[gary] ⚠️  _on_main failed: {e}", flush=True)
 
@@ -196,6 +231,41 @@ async def dispatch(event: Event, window: webview.Window, bus: Bus) -> None:
             f"gary.showPermission({json.dumps(title)}, {json.dumps(description)})"
         )
 
+    elif event.type == "show_listening":
+        print("[gary] 🎙  show_listening")
+        window.evaluate_js("gary.showListening()")
+
+    elif event.type == "show_thinking":
+        print("[gary] 🧠 show_thinking")
+        window.evaluate_js("gary.showThinking()")
+
+    elif event.type == "show_toast":
+        message = event.payload.get("message", "")
+        duration = int(event.payload.get("duration", 3000))
+        print(f"[gary] 🍞 toast: {message}")
+        window.evaluate_js(f"gary.showToast({json.dumps(message)}, {duration})")
+
+    elif event.type == "show_idle":
+        print("[gary] 💤 show_idle")
+        window.evaluate_js("gary.renderIndicator()")
+
+    elif event.type == "gary_listening":
+        print("[gary] 🎙  voice → listening")
+        window.evaluate_js("gary.showListening()")
+
+    elif event.type == "gary_thinking":
+        print("[gary] 🧠 voice → thinking")
+        window.evaluate_js("gary.showThinking()")
+
+    elif event.type == "gary_speaking":
+        print("[gary] 🔊 voice → speaking")
+        window.evaluate_js("gary.showThinking()")  # thinking arc while TTS plays
+
+    elif event.type == "gary_idle":
+        print("[gary] 💤 voice → idle")
+        window.evaluate_js("gary.renderIndicator()")
+        window.evaluate_js("gary.disconnectMic()")
+
     elif event.type == "copy_to_clipboard":
         text = event.payload.get("text", "")
         if text:
@@ -223,6 +293,94 @@ async def bus_loop(window: webview.Window) -> None:
 def _run_bus(window: webview.Window) -> None:
     """Entry point for the background daemon thread."""
     asyncio.run(bus_loop(window))
+
+
+# ---------------------------------------------------------------------------
+# Spacebar hold → LiveKit room trigger
+# ---------------------------------------------------------------------------
+
+HOLD_SECONDS = 5.0
+_space_pressed_at: float | None = None
+_hold_fired = False
+_progress_thread: threading.Thread | None = None
+_kb_window: webview.Window | None = None
+
+
+async def _create_livekit_room() -> None:
+    """Create a LiveKit room, generate a user token, and connect the webview mic."""
+    try:
+        from livekit import api as lk_api
+        from livekit.api import AccessToken, VideoGrants
+
+        livekit_url = os.getenv("LIVEKIT_URL", "")
+        api_key     = os.getenv("LIVEKIT_API_KEY", "")
+        api_secret  = os.getenv("LIVEKIT_API_SECRET", "")
+        room_name   = f"gary-{int(time.time())}"
+
+        # Create the room — this wakes the voice agent worker.
+        lk = lk_api.LiveKitAPI(url=livekit_url, api_key=api_key, api_secret=api_secret)
+        await lk.room.create_room(lk_api.CreateRoomRequest(name=room_name))
+        await lk.aclose()
+        print(f"[gary] LiveKit room created: {room_name}", flush=True)
+
+        # Generate a participant token for the user's microphone.
+        token = (
+            AccessToken(api_key, api_secret)
+            .with_identity("user")
+            .with_name("User")
+            .with_grants(VideoGrants(room_join=True, room=room_name))
+            .to_jwt()
+        )
+
+        # Tell the webview to join the room with the mic.
+        if _kb_window:
+            _kb_window.evaluate_js(
+                f"gary.connectMic({json.dumps(livekit_url)}, {json.dumps(token)})"
+            )
+            print("[gary] connectMic sent to webview", flush=True)
+
+    except Exception as exc:
+        print(f"[gary] ⚠️  LiveKit room creation failed: {exc}", flush=True)
+
+
+def _progress_loop() -> None:
+    """Runs in a daemon thread while spacebar is held — updates arc fill every 100ms."""
+    global _hold_fired, _kb_window
+    while True:
+        time.sleep(0.1)
+        if _space_pressed_at is None:
+            break
+        elapsed = time.time() - _space_pressed_at
+        progress = min(elapsed / HOLD_SECONDS, 1.0)
+
+        if _kb_window:
+            _kb_window.evaluate_js(f"gary.showSpaceHold({progress:.3f})")
+
+        if progress >= 1.0 and not _hold_fired:
+            _hold_fired = True
+            if _kb_window:
+                _kb_window.evaluate_js("gary.showListening()")
+            asyncio.run(_create_livekit_room())
+            break
+
+
+_space_event_monitor: object | None = None  # must stay alive to avoid GC
+
+
+def _space_pressed() -> None:
+    global _space_pressed_at, _hold_fired, _progress_thread
+    if _space_pressed_at is None:
+        _space_pressed_at = time.time()
+        _hold_fired = False
+        _progress_thread = threading.Thread(target=_progress_loop, daemon=True)
+        _progress_thread.start()
+
+
+def _space_released() -> None:
+    global _space_pressed_at, _hold_fired
+    _space_pressed_at = None
+    if not _hold_fired and _kb_window:
+        _kb_window.evaluate_js("gary.renderIndicator()")
 
 
 # ---------------------------------------------------------------------------

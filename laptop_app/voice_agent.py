@@ -27,6 +27,7 @@ from livekit.plugins import cartesia, deepgram, google, silero
 from bus.redis_bus import Bus
 from events.schema import Event
 from tools.home_assistant import control_bulb
+import tools.teach as teach_tool
 
 # Load .env from project root — worker subprocesses may not inherit shell env.
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -43,7 +44,13 @@ You can see the user's screen when asked and help with any task.
 
 IMPORTANT: You have tools available. When the user asks to control lights, turn them on or off, \
 or adjust room lighting — you MUST call the control_lights tool. Do not just say you will do it. \
-Actually call the tool.\
+Actually call the tool.
+
+TEACHING MODE: When the user asks you to teach them something (HTML, CSS, Python, a button, \
+a webpage, etc.) — call begin_teaching with a short topic description like "html button" or \
+"css flexbox". After you speak each explanation, wait for the user to say "next", "got it", \
+"continue", "ok", or similar — then call next_lesson_block to advance to the next block. \
+Do not generate lesson content yourself — always use the tools.\
 """
 
 _STATE_TO_BUS = {
@@ -80,6 +87,21 @@ class GaryVoiceAgent(Agent):
         """Turn the lights on, off, or toggle them. Use this for any request about lights, room lighting, or brightness."""
         logger.info("[gary-voice] control_lights: action=%s", action)
         return await control_bulb(action, self._bus, area=None)
+
+    @function_tool
+    async def begin_teaching(
+        self,
+        topic: Annotated[str, "What to teach, e.g. 'html button', 'css flexbox', 'python list'"],
+    ) -> str:
+        """Start a coding lesson for the user. Call this when the user asks Gary to teach them how to build or code something."""
+        logger.info("[gary-voice] begin_teaching: topic=%r", topic)
+        return await teach_tool.begin_teaching(topic, self._bus)
+
+    @function_tool
+    async def next_lesson_block(self) -> str:
+        """Advance to the next block in the active lesson. Call this when the user says next, got it, continue, ok, or similar."""
+        logger.info("[gary-voice] next_lesson_block")
+        return await teach_tool.next_lesson_block(self._bus)
 
 
 async def entrypoint(ctx: JobContext) -> None:
