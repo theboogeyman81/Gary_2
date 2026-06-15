@@ -1,0 +1,74 @@
+GARY — GESTURE PIPELINE COMMANDS
+==================================
+
+PREREQUISITES
+-------------
+Make sure Redis is running before starting anything:
+    brew services start redis
+
+Make sure .env is configured:
+    - HA_URL, HA_TOKEN, ENTITY_ID
+    - POV_CAMERA_SOURCE=mac:0
+    - HAND_CAMERA_SOURCE=mac:1
+    - SHOW_CAMERA=true   (to see live camera windows)
+
+Run list_cameras to identify which camera index is which:
+    uv run python -m scripts.list_cameras
+
+
+FULL GESTURE PIPELINE (4 terminals)
+-------------------------------------
+
+Terminal 1 — monitor all bus events (see everything happening):
+    uv run python -m scripts.monitor_bus
+
+Terminal 2 — dual pipeline (both cameras: YOLO/ArUco + hand tracking):
+    uv run python -m pipelines.dual_pipeline
+
+Terminal 3 — gesture correlator (joins device_in_view + pinch → gesture_command):
+    uv run python -m pipelines.gesture_correlator
+
+Terminal 4 — agent main loop (receives gesture_command → toggles HA bulb):
+    uv run python -m agent.main_loop
+
+
+EXPECTED EVENT FLOW
+--------------------
+1. Hold ArUco sticker (id=3) in front of camera 0 (POV camera)
+   → monitor shows: device_entered_view {device_id: light.smart_bulb_12_5w_2}
+
+2. Hold pinch in front of camera 1 (hand camera) for ~0.6s
+   → monitor shows: pinch_detected
+   → monitor shows: gesture_command
+   → monitor shows: device_action (bulb toggles)
+
+
+TEST HA CONNECTION
+-------------------
+    uv run python -m scripts.test_ha
+
+
+PINCH TUNING (in .env)
+------------------------
+PINCH_ENTER_THRESHOLD=0.05   # how tight the pinch must be to start (lower = tighter)
+PINCH_EXIT_THRESHOLD=0.09    # how wide to open to cancel/re-arm (higher = more open)
+PINCH_HOLD_DURATION=0.6      # seconds to hold before firing
+
+
+GIT
+----
+Switch branch:
+    git checkout main
+
+Commit changes:
+    git add <files>
+    git commit -m "message"
+
+Push branch:
+    git push origin <branch-name>
+
+
+
+
+uv run python -m laptop_app.voice_agent
+  console --input-device 1 --output-device 2

@@ -48,9 +48,12 @@ Actually call the tool.
 
 TEACHING MODE: When the user asks you to teach them something (HTML, CSS, Python, a button, \
 a webpage, etc.) — call begin_teaching with a short topic description like "html button" or \
-"css flexbox". After you speak each explanation, wait for the user to say "next", "got it", \
-"continue", "ok", or similar — then call next_lesson_block to advance to the next block. \
-Do not generate lesson content yourself — always use the tools.\
+"css flexbox". Gary will return a diagnostic question for you to speak to the user. \
+When the user answers that question, call answer_diagnostic with a short summary of what they said \
+(e.g. "no never coded before" or "yes some HTML"). Gary may ask one follow-up — same rule, \
+call answer_diagnostic with their answer. Once diagnostics are done, the lesson starts automatically. \
+Then wait for the user to say "next", "got it", "continue", "ok", or similar — then call \
+next_lesson_block to advance. Do not generate lesson content yourself — always use the tools.\
 """
 
 _STATE_TO_BUS = {
@@ -96,6 +99,15 @@ class GaryVoiceAgent(Agent):
         """Start a coding lesson for the user. Call this when the user asks Gary to teach them how to build or code something."""
         logger.info("[gary-voice] begin_teaching: topic=%r", topic)
         return await teach_tool.begin_teaching(topic, self._bus)
+
+    @function_tool
+    async def answer_diagnostic(
+        self,
+        answer: Annotated[str, "Short summary of what the user said, e.g. 'no never coded before' or 'yes some HTML'"],
+    ) -> str:
+        """Record the user's answer to a diagnostic question. Call this whenever the user answers a question Gary asked before starting a lesson."""
+        logger.info("[gary-voice] answer_diagnostic: answer=%r", answer)
+        return await teach_tool.answer_diagnostic(answer, self._bus)
 
     @function_tool
     async def next_lesson_block(self) -> str:

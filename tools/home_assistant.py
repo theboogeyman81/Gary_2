@@ -42,10 +42,9 @@ async def _ha_request(method: str, path: str, json_body: dict | None = None) -> 
         return None
 
 
-async def get_bulb_state(target_entity_id: str | None = None) -> str | None:
-    """Get the current state of an entity ('on' or 'off'). Defaults to ENTITY_ID from config."""
-    eid = target_entity_id or ENTITY_ID
-    result = await _ha_request("GET", f"/api/states/{eid}")
+async def get_bulb_state() -> str | None:
+    """Get the current state of the bulb ('on' or 'off')."""
+    result = await _ha_request("GET", f"/api/states/{ENTITY_ID}")
     if result is None:
         return None
     return result.get("state")
@@ -61,19 +60,18 @@ async def control_bulb(
     Control lights. action must be 'on', 'off', or 'toggle'.
 
     Target priority: entity_id > area > default ENTITY_ID from config.
-      entity_id: a specific HA entity (e.g. 'light.smart_bulb_12_5w_2') — used by gesture pipeline
+      entity_id: a specific HA entity (e.g. 'light.bedroom_lamp') — used by gesture pipeline
       area: an HA area_id (e.g. 'bedroom') — used for voice commands like "bedroom lights"
       (neither): falls back to the ENTITY_ID env var
 
     Examples:
       - "turn on the lights" → action='on'
       - "turn off my room lights" → action='off', area='my_room'
-      - gesture toggle → action='toggle', entity_id='light.smart_bulb_12_5w_2'
+      - gesture toggle → action='toggle', entity_id='light.bedroom_lamp'
     """
-    # Resolve the target entity first so toggle queries the right state.
-    resolved_entity = entity_id or ENTITY_ID
+    # Handle toggle: check state of the default entity (area toggles aren't state-queryable easily)
     if action == "toggle":
-        state = await get_bulb_state(resolved_entity)
+        state = await get_bulb_state()
         if state == "on":
             action = "off"
         elif state == "off":
@@ -92,8 +90,8 @@ async def control_bulb(
         payload = {"area_id": area}
         target_label = f"area:{area}"
     else:
-        payload = {"entity_id": resolved_entity}
-        target_label = resolved_entity
+        payload = {"entity_id": ENTITY_ID}
+        target_label = ENTITY_ID
 
     path = f"/api/services/light/turn_{action}"
     result = await _ha_request("POST", path, json_body=payload)
