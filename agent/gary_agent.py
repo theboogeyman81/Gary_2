@@ -27,6 +27,7 @@ from tools.memory import (
     recall as recall_impl,
     forget as forget_impl,
 )
+from tools.youtube_notes import youtube_notes as youtube_notes_impl
 
 
 @dataclass
@@ -62,7 +63,9 @@ agent = Agent(
         "When the user asks about lights, the bulb, or the lamp, use control_bulb. "
         "When the user says 'play', 'put on', or asks to listen to a song or artist, use play_music. "
         "When the user says 'remember' or 'save', use the remember tool. "
-        "When the user asks 'what did I say about...', 'what do I prefer...', use recall."
+        "When the user asks 'what did I say about...', 'what do I prefer...', use recall. "
+        "When the user asks to get notes, summarize, or extract code from a video they're watching, "
+        "use get_youtube_notes — no URL needed, Gary reads it from the browser automatically."
     ),
 )
 
@@ -121,3 +124,9 @@ async def forget(ctx: RunContext[GaryDeps], memory_id: int) -> str:
 async def play_music(ctx: RunContext[GaryDeps], song: str) -> str:
     """Open YouTube Music in Chrome and play the given song or artist."""
     return await play_music_impl(song, ctx.deps.bus)
+
+
+@agent.tool
+async def get_youtube_notes(ctx: RunContext[GaryDeps]) -> str:
+    """Get notes from the YouTube video the user is currently watching. Reads the browser tab automatically, fetches the transcript, summarizes it with AI, saves to ~/Gary_notes/, and shows a popup."""
+    return await youtube_notes_impl(ctx.deps.bus)

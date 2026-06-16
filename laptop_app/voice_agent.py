@@ -28,6 +28,7 @@ from bus.redis_bus import Bus
 from events.schema import Event
 from tools.home_assistant import control_bulb
 import tools.teach as teach_tool
+import tools.youtube_notes as youtube_notes_tool
 
 # Load .env from project root — worker subprocesses may not inherit shell env.
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -53,7 +54,12 @@ When the user answers that question, call answer_diagnostic with a short summary
 (e.g. "no never coded before" or "yes some HTML"). Gary may ask one follow-up — same rule, \
 call answer_diagnostic with their answer. Once diagnostics are done, the lesson starts automatically. \
 Then wait for the user to say "next", "got it", "continue", "ok", or similar — then call \
-next_lesson_block to advance. Do not generate lesson content yourself — always use the tools.\
+next_lesson_block to advance. Do not generate lesson content yourself — always use the tools.
+
+YOUTUBE NOTES: When the user asks you to get notes, summarize, extract code, or take notes from \
+a video they are watching — call get_youtube_notes. Gary will read the current browser tab, \
+fetch the transcript, and return a spoken confirmation. Do not ask for a URL — Gary finds it \
+automatically.\
 """
 
 _STATE_TO_BUS = {
@@ -114,6 +120,12 @@ class GaryVoiceAgent(Agent):
         """Advance to the next block in the active lesson. Call this when the user says next, got it, continue, ok, or similar."""
         logger.info("[gary-voice] next_lesson_block")
         return await teach_tool.next_lesson_block(self._bus)
+
+    @function_tool
+    async def get_youtube_notes(self) -> str:
+        """Get notes from the YouTube video the user is currently watching. Fetches the transcript, summarizes it, saves to a file, and shows a popup. No URL needed — Gary reads it from the browser."""
+        logger.info("[gary-voice] get_youtube_notes")
+        return await youtube_notes_tool.youtube_notes(self._bus)
 
 
 async def entrypoint(ctx: JobContext) -> None:

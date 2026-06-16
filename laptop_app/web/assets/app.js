@@ -21,6 +21,14 @@ function escapeHTML(str) {
 // Remembers the last card Python sent so the arc can re-open it.
 let _lastCard = null;
 
+// True while the card is displayed — state transitions must not replace it.
+let _cardVisible = false;
+let _autoDismissTimer = null;
+
+function _clearAutoDismiss() {
+  if (_autoDismissTimer) { clearTimeout(_autoDismissTimer); _autoDismissTimer = null; }
+}
+
 // --- Markup builders ---------------------------------------------------------
 
 // Builds an HTML string for the resting indicator (quarter-circle arc).
@@ -160,10 +168,10 @@ window.gary.renderIndicator = function () {
 };
 
 // gary.queuePopup(title, text)
-// Stores payload and shows the idle arc — used when show_popup arrives on the bus.
+// Auto-shows the card immediately when show_popup arrives on the bus.
 window.gary.queuePopup = function (title, text) {
   _lastCard = { title, text };
-  window.gary.renderIndicator();
+  window.gary.renderCard(title, text);
 };
 
 // gary.showSpaceHold(progress)
@@ -200,6 +208,7 @@ window.gary.showSpaceHold = function (progress) {
 // Switches the overlay to the speaking arc state — a faster ripple than
 // "thinking", indicating Gary is talking.
 window.gary.showSpeaking = function () {
+  if (_cardVisible) return;
   overlay().innerHTML = speakingHTML();
 };
 
@@ -237,6 +246,7 @@ window.gary.showSpaceHold = function (progress) {
 // Python calls this when the microphone opens. No interaction — Python drives
 // the transition out by calling queuePopup() or renderIndicator().
 window.gary.showListening = function () {
+  if (_cardVisible) return;
   overlay().innerHTML = listeningHTML();
 };
 
@@ -244,6 +254,7 @@ window.gary.showListening = function () {
 // Switches the overlay to the thinking arc state.
 // Python calls this while the agent is processing. Same lifecycle as showListening.
 window.gary.showThinking = function () {
+  if (_cardVisible) return;
   overlay().innerHTML = thinkingHTML();
 };
 
@@ -291,14 +302,26 @@ window.gary.showPermission = function (title, description) {
 
 // gary.renderCard(title, text)
 // Replaces the overlay with a fixed-height card showing title + scrollable text.
+// Auto-dismisses after 10 seconds.
 window.gary.renderCard = function (title, text) {
   _lastCard = { title, text };
+  _cardVisible = true;
+  _clearAutoDismiss();
   overlay().innerHTML = cardHTML(title, text);
+
+  // Auto-dismiss after 10 s — returns to the idle indicator.
+  _autoDismissTimer = setTimeout(function () {
+    _cardVisible = false;
+    _autoDismissTimer = null;
+    window.gary.renderIndicator();
+  }, 10000);
 
   const card = overlay().querySelector('.g-card');
 
-  // Close → back to idle indicator.
+  // Close → cancel the timer and go back to idle indicator.
   card.querySelector('.g-card-x').addEventListener('click', function () {
+    _cardVisible = false;
+    _clearAutoDismiss();
     window.gary.renderIndicator();
   });
 
