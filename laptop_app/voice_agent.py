@@ -27,6 +27,7 @@ from livekit.plugins import cartesia, deepgram, google, silero
 from bus.redis_bus import Bus
 from events.schema import Event
 from tools.home_assistant import control_bulb
+from tools.fire_tv import control_tv as control_tv_impl, launch_tv_app as launch_tv_app_impl
 import tools.teach as teach_tool
 import tools.youtube_notes as youtube_notes_tool
 
@@ -46,6 +47,10 @@ You can see the user's screen when asked and help with any task.
 IMPORTANT: You have tools available. When the user asks to control lights, turn them on or off, \
 or adjust room lighting — you MUST call the control_lights tool. Do not just say you will do it. \
 Actually call the tool.
+
+When the user mentions the TV, pausing, playing, volume, or turning it on/off — call control_tv. \
+When the user asks to open or launch an app (Netflix, Prime, YouTube, HBO, Disney) — call open_tv_app. \
+Do not just say you will do it. Actually call the tool.
 
 TEACHING MODE: When the user asks you to teach them something (HTML, CSS, Python, a button, \
 a webpage, etc.) — call begin_teaching with a short topic description like "html button" or \
@@ -126,6 +131,24 @@ class GaryVoiceAgent(Agent):
         """Get notes from the YouTube video the user is currently watching. Fetches the transcript, summarizes it, saves to a file, and shows a popup. No URL needed — Gary reads it from the browser."""
         logger.info("[gary-voice] get_youtube_notes")
         return await youtube_notes_tool.youtube_notes(self._bus)
+
+    @function_tool
+    async def control_tv(
+        self,
+        action: Annotated[str, "Action: play, pause, play_pause, stop, volume_up, volume_down, mute, next, previous, turn_on, turn_off"],
+    ) -> str:
+        """Control the Fire TV Stick. Use for any request about the TV: pause, play, volume, skip, turn on/off."""
+        logger.info("[gary-voice] control_tv: action=%s", action)
+        return await control_tv_impl(action, self._bus)
+
+    @function_tool
+    async def open_tv_app(
+        self,
+        app: Annotated[str, "App name: netflix, prime, youtube, hbo, disney, peacock"],
+    ) -> str:
+        """Open an app on the Fire TV Stick. Use when the user asks to launch or watch something on TV."""
+        logger.info("[gary-voice] open_tv_app: app=%r", app)
+        return await launch_tv_app_impl(app, self._bus)
 
 
 async def entrypoint(ctx: JobContext) -> None:

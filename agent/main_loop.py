@@ -17,6 +17,7 @@ from events.schema import Event
 from agent.gary_agent import agent, GaryDeps
 from memory.store import init_db
 from tools.home_assistant import control_bulb as control_bulb_impl
+from tools.fire_tv import control_tv as control_tv_impl
 
 
 async def handle_speech(event: Event, deps: GaryDeps) -> None:
@@ -38,8 +39,11 @@ async def handle_gesture_command(event: Event, deps: GaryDeps) -> None:
     """Handle a gesture_command — directly toggle the device, no LLM needed."""
     entity_id = event.payload.get("device_id", "")
     friendly_name = event.payload.get("friendly_name", entity_id)
-    print(f"[main_loop] Gesture toggle: {entity_id} ({friendly_name})")
-    result = await control_bulb_impl("toggle", deps.bus, entity_id=entity_id)
+    print(f"[main_loop] Gesture: {entity_id} ({friendly_name})")
+    if entity_id.startswith("media_player."):
+        result = await control_tv_impl("play_pause", deps.bus, entity_id=entity_id)
+    else:
+        result = await control_bulb_impl("toggle", deps.bus, entity_id=entity_id)
     print(f"[main_loop] HA result: {result}")
 
 

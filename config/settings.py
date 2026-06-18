@@ -19,6 +19,7 @@ load_dotenv()
 HA_URL = os.getenv("HA_URL", "")
 HA_TOKEN = os.getenv("HA_TOKEN", "")
 ENTITY_ID = os.getenv("ENTITY_ID", "")
+FIRE_TV_ENTITY_ID = os.getenv("FIRE_TV_ENTITY_ID", "media_player.living_room_tv")
 
 # Gesture pipeline — camera sources
 POV_CAMERA_SOURCE = os.getenv("POV_CAMERA_SOURCE", "mac:0")

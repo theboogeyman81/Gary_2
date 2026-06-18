@@ -21,6 +21,7 @@ from tools.request_screenshot import request_screenshot as request_screenshot_im
 from tools.show_popup import show_popup as show_popup_impl
 from tools.copy_to_clipboard import copy_to_clipboard as copy_to_clipboard_impl
 from tools.home_assistant import control_bulb as control_bulb_impl
+from tools.fire_tv import control_tv as control_tv_impl, launch_tv_app as launch_tv_app_impl
 from tools.play_music import play_music as play_music_impl
 from tools.memory import (
     remember as remember_impl,
@@ -53,6 +54,8 @@ agent = Agent(
         "- show_popup: show text on the laptop screen\n"
         "- copy_to_clipboard: copy text so the user can paste it\n"
         "- control_bulb: turn the smart bulb on, off, or toggle it\n"
+        "- control_tv: control the Fire TV (play, pause, volume, turn on/off)\n"
+        "- open_tv_app: launch Netflix, Prime Video, YouTube, HBO Max, Disney+ on the TV\n"
         "- play_music: open YouTube Music and play a song\n"
         "- remember: save a fact when the user tells you to\n"
         "- recall: search for facts you've saved\n"
@@ -61,6 +64,8 @@ agent = Agent(
         "When the user asks for a prompt, code, or anything they'll paste elsewhere, "
         "use show_popup AND copy_to_clipboard together, then speak a short confirmation. "
         "When the user asks about lights, the bulb, or the lamp, use control_bulb. "
+        "When the user mentions the TV, pausing, playing, volume, or turning the TV on/off, use control_tv. "
+        "When the user asks to open or launch an app on the TV (Netflix, Prime, YouTube, HBO, Disney), use open_tv_app. "
         "When the user says 'play', 'put on', or asks to listen to a song or artist, use play_music. "
         "When the user says 'remember' or 'save', use the remember tool. "
         "When the user asks 'what did I say about...', 'what do I prefer...', use recall. "
@@ -118,6 +123,18 @@ async def recall(ctx: RunContext[GaryDeps], query: str) -> str:
 async def forget(ctx: RunContext[GaryDeps], memory_id: int) -> str:
     """Delete a memory by its ID."""
     return await forget_impl(memory_id)
+
+
+@agent.tool
+async def control_tv(ctx: RunContext[GaryDeps], action: str) -> str:
+    """Control the Fire TV Stick. action: play, pause, play_pause, stop, volume_up, volume_down, mute, next, previous, turn_on, turn_off."""
+    return await control_tv_impl(action, ctx.deps.bus)
+
+
+@agent.tool
+async def open_tv_app(ctx: RunContext[GaryDeps], app: str) -> str:
+    """Launch an app on the Fire TV. app: netflix, prime, youtube, hbo, disney, peacock."""
+    return await launch_tv_app_impl(app, ctx.deps.bus)
 
 
 @agent.tool
