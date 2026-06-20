@@ -29,6 +29,7 @@ from tools.memory import (
     forget as forget_impl,
 )
 from tools.youtube_notes import youtube_notes as youtube_notes_impl
+import tools.annotate as annotate_tool
 
 
 @dataclass
@@ -70,7 +71,9 @@ agent = Agent(
         "When the user says 'remember' or 'save', use the remember tool. "
         "When the user asks 'what did I say about...', 'what do I prefer...', use recall. "
         "When the user asks to get notes, summarize, or extract code from a video they're watching, "
-        "use get_youtube_notes — no URL needed, Gary reads it from the browser automatically."
+        "use get_youtube_notes — no URL needed, Gary reads it from the browser automatically. "
+        "When the user says 'annotate this', 'what's wrong with my code', 'highlight the bug', "
+        "or asks to review their screen — use annotate_screen."
     ),
 )
 
@@ -147,3 +150,9 @@ async def play_music(ctx: RunContext[GaryDeps], song: str) -> str:
 async def get_youtube_notes(ctx: RunContext[GaryDeps]) -> str:
     """Get notes from the YouTube video the user is currently watching. Reads the browser tab automatically, fetches the transcript, summarizes it with AI, saves to ~/Gary_notes/, and shows a popup."""
     return await youtube_notes_impl(ctx.deps.bus)
+
+
+@agent.tool
+async def annotate_screen(ctx: RunContext[GaryDeps]) -> str:
+    """Capture a screenshot and draw glowing rings on visible issues or bugs. Use when the user asks to annotate, highlight, or review their screen."""
+    return await annotate_tool.annotate_screen(ctx.deps.bus)

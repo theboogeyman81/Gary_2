@@ -25,6 +25,9 @@ let _lastCard = null;
 let _cardVisible = false;
 let _autoDismissTimer = null;
 
+// Auto-clear timer for the annotation SVG layer.
+let _annotationTimer = null;
+
 function _clearAutoDismiss() {
   if (_autoDismissTimer) { clearTimeout(_autoDismissTimer); _autoDismissTimer = null; }
 }
@@ -397,6 +400,45 @@ window.gary.disconnectMic = async function () {
     window._garyRoom = null;
     console.log('[gary] mic disconnected');
   }
+};
+
+// Builds a full-viewport SVG with one annotation group (outer ring + inner dot +
+// label) per point. Coordinates are pixel-precise using window dimensions so
+// normalized 0–1 floats map correctly without SVG viewBox distortion.
+// Builds the annotation layer as percentage-positioned divs so Gemini's
+// normalised 0–1 coords map directly to CSS left/top — no pixel maths needed.
+function annotationsHTML(points) {
+  var pins = points.map(function (p) {
+    var left = (p.x * 100).toFixed(3) + '%';
+    var top  = (p.y * 100).toFixed(3) + '%';
+    var label = escapeHTML(p.label || '');
+    return (
+      '<div class="g-annotation-point" style="left:' + left + ';top:' + top + '">' +
+        '<div class="g-annotation-ring--outer"></div>' +
+        '<div class="g-annotation-ring--inner"></div>' +
+        '<span class="g-annotation-label">' + label + '</span>' +
+      '</div>'
+    );
+  }).join('');
+  return '<div id="g-annotations-layer" class="g-annotations">' + pins + '</div>';
+}
+
+// gary.showAnnotations(points)
+// Appends a full-screen SVG annotation layer to the overlay without replacing
+// the existing card or indicator. Rings auto-clear after 12 seconds.
+window.gary.showAnnotations = function (points) {
+  window.gary.clearAnnotations();
+  if (!points || points.length === 0) return;
+  overlay().insertAdjacentHTML('beforeend', annotationsHTML(points));
+  _annotationTimer = setTimeout(window.gary.clearAnnotations, 12000);
+};
+
+// gary.clearAnnotations()
+// Removes the annotation SVG layer and cancels the auto-clear timer.
+window.gary.clearAnnotations = function () {
+  if (_annotationTimer) { clearTimeout(_annotationTimer); _annotationTimer = null; }
+  var layer = document.getElementById('g-annotations-layer');
+  if (layer) layer.parentNode.removeChild(layer);
 };
 
 // --- Boot --------------------------------------------------------------------

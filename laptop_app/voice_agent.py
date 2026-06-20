@@ -28,6 +28,7 @@ from bus.redis_bus import Bus
 from events.schema import Event
 from tools.home_assistant import control_bulb
 from tools.fire_tv import control_tv as control_tv_impl, launch_tv_app as launch_tv_app_impl
+import tools.annotate as annotate_tool
 import tools.teach as teach_tool
 import tools.youtube_notes as youtube_notes_tool
 
@@ -64,7 +65,11 @@ next_lesson_block to advance. Do not generate lesson content yourself — always
 YOUTUBE NOTES: When the user asks you to get notes, summarize, extract code, or take notes from \
 a video they are watching — call get_youtube_notes. Gary will read the current browser tab, \
 fetch the transcript, and return a spoken confirmation. Do not ask for a URL — Gary finds it \
-automatically.\
+automatically.
+
+SCREEN ANNOTATION: When the user says "annotate this", "what's wrong with my code", \
+"highlight the bug", "review my screen", or anything similar — call annotate_screen. Gary will \
+capture the screen, analyze it with vision AI, and draw glowing rings on each issue found.\
 """
 
 _STATE_TO_BUS = {
@@ -131,6 +136,12 @@ class GaryVoiceAgent(Agent):
         """Get notes from the YouTube video the user is currently watching. Fetches the transcript, summarizes it, saves to a file, and shows a popup. No URL needed — Gary reads it from the browser."""
         logger.info("[gary-voice] get_youtube_notes")
         return await youtube_notes_tool.youtube_notes(self._bus)
+
+    @function_tool
+    async def annotate_screen(self) -> str:
+        """Capture a screenshot and draw glowing rings on visible issues or bugs. Use when the user asks to annotate, highlight, or review what's on their screen."""
+        logger.info("[gary-voice] annotate_screen")
+        return await annotate_tool.annotate_screen(self._bus)
 
     @function_tool
     async def control_tv(

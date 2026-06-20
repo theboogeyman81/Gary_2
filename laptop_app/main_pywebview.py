@@ -39,6 +39,8 @@ LAPTOP_EVENTS = {
     "show_toast", "show_idle",
     # Voice agent state transitions
     "gary_listening", "gary_thinking", "gary_speaking", "gary_idle",
+    # Screen annotation
+    "show_annotations",
 }
 
 
@@ -265,6 +267,11 @@ async def dispatch(event: Event, window: webview.Window, bus: Bus) -> None:
         print("[gary] 💤 voice → idle")
         window.evaluate_js("gary.renderIndicator()")
         window.evaluate_js("gary.disconnectMic()")
+
+    elif event.type == "show_annotations":
+        points = event.payload.get("points", [])
+        print(f"[gary] 🎯 show_annotations: {len(points)} points")
+        window.evaluate_js(f"gary.showAnnotations({json.dumps(points)})")
 
     elif event.type == "copy_to_clipboard":
         text = event.payload.get("text", "")

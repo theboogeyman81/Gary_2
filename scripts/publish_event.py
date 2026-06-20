@@ -10,6 +10,7 @@ This lets us test Gary without real glasses, mics, or cameras.
 """
 
 import asyncio
+import json
 import sys
 from bus.redis_bus import Bus
 from events.schema import Event
@@ -48,6 +49,8 @@ async def main():
         payload = {"message": content}
     elif event_type == "request_permission":
         payload = {"title": content, "description": "Gary is requesting access."}
+    elif event_type == "show_annotations":
+        payload = json.loads(content.replace('\n', ' ').replace('\r', '')) if content else {"points": []}
     # No-content states — content arg is ignored
     elif event_type in {"show_listening", "show_thinking", "show_idle"}:
         payload = {}

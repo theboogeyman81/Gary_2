@@ -291,6 +291,50 @@
     transition:stroke-dasharray .1s linear;
   }
 
+  /* ============================================================
+     11 ANNOTATIONS — pulsing rings pinned over the screen.
+     Div-based so left/top percentages map directly to Gemini's
+     normalised 0–1 coordinates — no SVG unit conversion needed.
+     ============================================================ */
+
+  /* Full-viewport container; pointer-events:none overrides .g-overlay > * */
+  .g-annotations{
+    position:absolute;inset:0;pointer-events:none;
+  }
+
+  /* One anchor div per point, centred on the coordinate */
+  .g-annotation-point{
+    position:absolute;width:56px;height:56px;
+    transform:translate(-50%,-50%);
+  }
+
+  /* Outer ring */
+  .g-annotation-ring--outer{
+    position:absolute;inset:0;border-radius:50%;
+    border:1.5px solid var(--g-accent);
+    animation:g-annot-pulse 2.2s ease-in-out infinite;
+  }
+
+  /* Inner filled dot */
+  .g-annotation-ring--inner{
+    position:absolute;inset:18px;border-radius:50%;
+    background:var(--g-accent-faint);border:2px solid var(--g-accent);
+    animation:g-annot-pulse 2.2s ease-in-out infinite .3s;
+  }
+
+  /* Label sits above the ring */
+  .g-annotation-label{
+    position:absolute;left:50%;bottom:calc(100% + 6px);
+    transform:translateX(-50%);white-space:nowrap;
+    color:var(--g-accent);font-family:var(--g-mono);
+    font-size:11px;font-weight:600;letter-spacing:.04em;
+  }
+
+  @keyframes g-annot-pulse{
+    0%,100%{opacity:.5}
+    50%{opacity:1;filter:drop-shadow(0 0 var(--g-glow-blur) var(--g-accent-soft))}
+  }
+
   @media (prefers-reduced-motion:reduce){
     .g-overlay *{animation-duration:.001ms!important;transition-duration:.001ms!important}
   }
