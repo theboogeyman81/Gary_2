@@ -20,12 +20,18 @@ import os
 from pathlib import Path
 from typing import Annotated
 
+import base64 as _base64
+
+import google.genai as genai
+import google.genai.types as genai_types
+
 from dotenv import load_dotenv
 from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli, function_tool
 from livekit.plugins import cartesia, deepgram, google, silero
 
 from bus.redis_bus import Bus
 from events.schema import Event
+from laptop_app.screenshot import capture_screen
 from tools.home_assistant import control_bulb
 from tools.fire_tv import control_tv as control_tv_impl, launch_tv_app as launch_tv_app_impl
 import tools.annotate as annotate_tool
@@ -43,7 +49,7 @@ You are Gary, an ambient AI assistant living on the user's laptop.
 Be concise and conversational — like a knowledgeable friend, not a search engine.
 Keep answers short: 1–3 sentences for simple questions, a bit more only when needed.
 No markdown, no bullet points — just natural spoken language.
-You can see the user's screen when asked and help with any task.
+You can see the user's screen when asked — call describe_screen whenever the user asks what's on their screen, what they're looking at, or needs help with something visible.
 
 IMPORTANT: You have tools available. When the user asks to control lights, turn them on or off, \
 or adjust room lighting — you MUST call the control_lights tool. Do not just say you will do it. \
@@ -106,6 +112,30 @@ class GaryVoiceAgent(Agent):
         """Turn the lights on, off, or toggle them. Use this for any request about lights, room lighting, or brightness."""
         logger.info("[gary-voice] control_lights: action=%s", action)
         return await control_bulb(action, self._bus, area=None)
+
+    @function_tool
+    async def describe_screen(self) -> str:
+        """Take a screenshot of the user's screen and describe what's on it. Use this when the user asks what's on their screen, what they're looking at, or wants help with something visible on screen."""
+        logger.info("[gary-voice] describe_screen: capturing screen")
+        loop = asyncio.get_event_loop()
+        shot = await loop.run_in_executor(None, capture_screen)
+        client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        response = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    genai_types.Part.from_bytes(
+                        data=_base64.b64decode(shot["base64"]),
+                        mime_type="image/png",
+                    ),
+                    "Describe what's on this screen concisely in 2-3 sentences. Focus on what the user is actively doing or looking at.",
+                ],
+            ),
+        )
+        description = response.text.strip()
+        logger.info("[gary-voice] describe_screen: %s", description[:80])
+        return description
 
     @function_tool
     async def begin_teaching(

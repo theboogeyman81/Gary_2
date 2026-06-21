@@ -183,6 +183,49 @@ def _open_in_editor(project_dir: Path) -> None:
     logger.info("[gary.teach] opened %s via open", project_dir)
 
 
+async def _generate_notes(session: TeachingSession, bus: Bus) -> None:
+    """Summarise the session into a short notes file and show a popup."""
+    blocks_summary = "\n".join(
+        f"- [{b.file}] {b.explanation}" for b in session.blocks
+    )
+    prompt = (
+        f'Write brief revision notes (max 200 words) for a beginner who just completed a coding lesson.\n'
+        f'Topic: "{session.topic}"\n'
+        f'Experience level: {session.level}\n\n'
+        f'What was covered:\n{blocks_summary}\n\n'
+        f'Include:\n'
+        f'1. One sentence on what they built\n'
+        f'2. Key concepts (3-5 bullet points, plain English, no code)\n'
+        f'3. Files created and what each does (one line each)\n'
+        f'4. One "try next" suggestion\n\n'
+        f'Plain text only — no markdown, no code blocks.'
+    )
+
+    try:
+        client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        notes = response.text.strip()
+    except Exception as exc:
+        logger.error("[gary.teach] notes generation failed: %s", exc)
+        notes = f"Lesson: {session.topic}\n\nCovered:\n{blocks_summary}"
+
+    notes_path = session.project_dir / "notes.txt"
+    notes_path.write_text(notes, encoding="utf-8")
+    logger.info("[gary.teach] notes written to %s", notes_path)
+
+    try:
+        await bus.publish(Event(
+            type="show_popup",
+            source="voice_agent",
+            payload={
+                "title": f"Session Notes — {session.topic}",
+                "text": f"Saved to: {notes_path}\n\n{notes}",
+            },
+        ))
+    except Exception as exc:
+        logger.warning("[gary.teach] notes popup failed: %s", exc)
+
+
 def _build_lesson_spec(topic: str, level: str) -> list[TeachingBlock]:
     client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
     prompt = _SPEC_PROMPTS[level].format(topic=topic)
@@ -325,11 +368,12 @@ async def next_lesson_block(bus: Bus) -> str:
 
     if _active_session.current >= total:
         topic = _active_session.topic
+        await _generate_notes(_active_session, bus)
         _active_session = None
         return (
             f"That's the whole lesson on {topic}. "
-            f"Your files are saved in Gary lessons slash {_slugify(topic)}. "
-            f"Open them in a browser and you'll see your work. Nice job."
+            f"I've saved a notes file to your project folder — check the overlay for a summary. "
+            f"Open the HTML file in a browser and you'll see your work. Nice job."
         )
 
     explanation = await _teach_block(_active_session, bus)
