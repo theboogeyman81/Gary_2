@@ -38,6 +38,15 @@ _DEVICES_YAML = Path(__file__).parent.parent / "config" / "devices.yaml"
 # ArUco dictionary — DICT_4X4_50 covers IDs 0-49, easy to print
 _ARUCO_DICT = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
 _ARUCO_PARAMS = cv2.aruco.DetectorParameters()
+# Tuned for JPEG-compressed WiFi streams — wider thresholding window and
+# higher error correction so compression artifacts don't break decoding.
+_ARUCO_PARAMS.adaptiveThreshWinSizeMin = 3
+_ARUCO_PARAMS.adaptiveThreshWinSizeMax = 53
+_ARUCO_PARAMS.adaptiveThreshWinSizeStep = 4
+_ARUCO_PARAMS.adaptiveThreshConstant = 7
+_ARUCO_PARAMS.minMarkerPerimeterRate = 0.02
+_ARUCO_PARAMS.maxMarkerPerimeterRate = 4.0
+_ARUCO_PARAMS.errorCorrectionRate = 0.9
 
 
 def _load_registry() -> tuple[dict[int, dict], dict[str, dict]]:
@@ -75,7 +84,10 @@ def _detect_aruco(
 ) -> list[tuple[dict, list, float, str]]:
     """Returns list of (device_entry, bbox, confidence, "aruco")."""
     detector = cv2.aruco.ArucoDetector(_ARUCO_DICT, _ARUCO_PARAMS)
-    corners, ids, _ = detector.detectMarkers(frame)
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
+    corners, ids, _ = detector.detectMarkers(gray)
     results: list[tuple[dict, list, float, str]] = []
     if ids is None:
         return results
