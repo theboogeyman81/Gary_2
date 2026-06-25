@@ -78,22 +78,65 @@ class MacWebcam:
 
 class XiaoStream:
     """
-    Placeholder for XIAO ESP32-S3 MJPEG/WebRTC stream.
-    Implement when XIAO firmware is ready. Same CameraSource interface.
+    MJPEG stream from a XIAO ESP32-S3 Sense running gary_camera firmware.
+
+    Reads the multipart/x-mixed-replace HTTP stream on a background thread
+    (requests is blocking), decodes JPEG frames by scanning for SOI/EOI markers,
+    and bridges to the async generator via an asyncio.Queue.
     """
 
     def __init__(self, host: str) -> None:
         self._host = host
+        self._url = f"http://{host}/stream"
+        self._stop = asyncio.Event()
 
     async def open(self) -> None:
         pass
 
-    async def frames(self) -> AsyncIterator[np.ndarray]:  # type: ignore[override]
-        raise NotImplementedError(f"XiaoStream ({self._host}) not yet implemented")
-        yield  # makes this an async generator so the return type is valid
+    async def frames(self) -> AsyncIterator[np.ndarray]:
+        import threading
+        import requests
+
+        self._stop.clear()
+        queue: asyncio.Queue[np.ndarray | None] = asyncio.Queue(maxsize=2)
+        loop = asyncio.get_running_loop()
+
+        def _reader() -> None:
+            try:
+                resp = requests.get(self._url, stream=True, timeout=(10, None))
+                buf = b""
+                for chunk in resp.iter_content(chunk_size=4096):
+                    if self._stop.is_set():
+                        break
+                    buf += chunk
+                    while True:
+                        start = buf.find(b'\xff\xd8')
+                        end = buf.find(b'\xff\xd9', start + 2 if start != -1 else 0)
+                        if start == -1 or end == -1:
+                            break
+                        jpg = buf[start:end + 2]
+                        buf = buf[end + 2:]
+                        frame = cv2.imdecode(np.frombuffer(jpg, np.uint8), cv2.IMREAD_COLOR)
+                        if frame is not None:
+                            asyncio.run_coroutine_threadsafe(queue.put(frame), loop).result(timeout=5)
+            except Exception as exc:
+                print(f"[XiaoStream] reader error: {exc}")
+            finally:
+                asyncio.run_coroutine_threadsafe(queue.put(None), loop)
+
+        t = threading.Thread(target=_reader, daemon=True)
+        t.start()
+        try:
+            while True:
+                frame = await queue.get()
+                if frame is None:
+                    raise RuntimeError(f"XiaoStream ({self._host}) stream ended or failed")
+                yield frame
+        finally:
+            self._stop.set()
 
     async def close(self) -> None:
-        pass
+        self._stop.set()
 
 
 def make_camera_source(spec: str) -> CameraSource:

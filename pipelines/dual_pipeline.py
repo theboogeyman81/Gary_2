@@ -97,6 +97,7 @@ async def _run_pov(bus: Bus, model: YOLO, cam: CameraSource) -> None:
     # Drain camera 0 at full 30 fps in a background task so the AVFoundation session
     # stays active even when YOLO is slow (3 fps on CPU). YOLO picks up the latest frame.
     latest: list = [None]
+    _pov_window_placed = False
 
     async def _drain() -> None:
         async for frame in cam.frames():
@@ -173,6 +174,9 @@ async def _run_pov(bus: Bus, model: YOLO, cam: CameraSource) -> None:
                     cv2.putText(display, f"{device['friendly_name']} {conf:.2f} [{method}] {tag}",
                                 (x, max(y - 6, 14)), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
                 cv2.imshow("pov camera", display)
+                if not _pov_window_placed:
+                    cv2.moveWindow("pov camera", 0, 0)
+                    _pov_window_placed = True
                 cv2.waitKey(1)
     finally:
         drain_task.cancel()
@@ -185,6 +189,7 @@ async def _run_hand(
     pinch_start: float | None = None
     ema_dist: float | None = None
     loop_start = time.monotonic()
+    _hand_window_placed = False
 
     async for frame in cam.frames():
         now = time.monotonic()
@@ -272,6 +277,9 @@ async def _run_hand(
                 cv2.putText(display, "no hand", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (60, 60, 60), 2)
             cv2.imshow("hand camera", display)
+            if not _hand_window_placed:
+                cv2.moveWindow("hand camera", 660, 0)
+                _hand_window_placed = True
             cv2.waitKey(1)
 
 

@@ -27,7 +27,7 @@ XIAO ESP32-S3 (hand) ──MJPEG/WiFi──┤
                         │  MediaPipe hand tracking      │
                         │  ArUco detection              │
                         └──────────────┬───────────────┘
-                                       │ Redis events over LAN
+                                       │ Redis events over LAN/hotspot
                                        ▼
                         Mac (Redis @ localhost)
                         ┌──────────────────────────────┐
@@ -37,15 +37,15 @@ XIAO ESP32-S3 (hand) ──MJPEG/WiFi──┤
                         └──────────────────────────────┘
 ```
 
-Redis runs on Mac. Pi connects remotely via `REDIS_HOST=<mac-lan-ip>`.
-Pi only runs the vision pipelines. All reasoning, tools, and UI stay on Mac.
+Redis runs on Mac. Pi connects remotely via `REDIS_HOST=raspberrypi.local` (mDNS — works
+on any network, no IP reconfiguration needed between home and exhibition).
 
 ---
 
 ## Phase 1 — Make Redis Network-Aware (zero breakage)
 
 **Why first:** Everything else depends on Mac↔Pi communication over Redis.
-Mac stays on `localhost`. Pi sets `REDIS_HOST=<mac-ip>`. No callers need to change.
+Mac stays on `localhost`. Pi uses mDNS hostname. No callers need to change.
 
 ### Files to change:
 
@@ -63,51 +63,68 @@ class Bus:
     def __init__(self, host: str = REDIS_HOST, port: int = REDIS_PORT):
 ```
 
-All 14 `Bus()` call sites stay unchanged. Mac `.env` needs no new entries (localhost is the default).
+All 14 `Bus()` call sites stay unchanged. Mac `.env` needs no new entries (localhost is default).
 
-**Mac Redis firewall:** Redis by default only binds to `127.0.0.1`. Edit `/opt/homebrew/etc/redis.conf`:
+**Mac Redis — bind to all interfaces:** Redis by default only binds to `127.0.0.1`.
+Edit `/opt/homebrew/etc/redis.conf`:
 ```
 bind 0.0.0.0
 protected-mode no
 ```
-Then `brew services restart redis`. Only do this on a trusted home network.
+Then `brew services restart redis`. Only do on trusted networks (home + known exhibition venue).
 
-**Verification:** `REDIS_HOST=<mac-ip> uv run python -m scripts.monitor_bus` from Pi — events should appear.
+**Pi `.env`:**
+```
+REDIS_HOST=<Mac's mDNS hostname>.local   # e.g. pratham-macbook.local
+REDIS_PORT=6379
+```
+
+Find Mac's mDNS hostname: `scutil --get LocalHostName` on Mac, then append `.local`.
+This hostname works on home WiFi, mobile hotspot, or any LAN — no changes ever needed.
+
+**Verification:** `uv run python -m scripts.monitor_bus` from Pi — events should appear on Mac terminal.
 
 ---
 
 ## Phase 2 — Implement XiaoStream (activates camera swap)
 
-**File:** `pipelines/camera_source.py` — the `XiaoStream` class stub at the bottom.
+**File:** `pipelines/camera_source.py` — the `XiaoStream` stub.
 
-The plan at `.claude/plans/xiao-esp32s3-camera.md` has the full MJPEG approach.
-Key implementation notes:
+Full MJPEG approach documented in `.claude/plans/xiao-esp32s3-camera.md`. Key points:
 - URL: `http://<host>/stream` (ESP32 CameraWebServer default)
-- Read response body continuously, scan for `\xff\xd8` (JPEG start) and `\xff\xd9` (JPEG end)
+- Scan byte stream for `\xff\xd8` (JPEG start) and `\xff\xd9` (JPEG end)
 - Decode with `cv2.imdecode(np.frombuffer(jpeg_bytes, np.uint8), cv2.IMREAD_COLOR)`
 - Wrap `iter_content` in `asyncio.to_thread` to stay non-blocking
-- Add reconnect logic: if connection drops, sleep 2s and retry
+- Add reconnect loop: if connection drops, sleep 2s and retry
+
+**Use mDNS hostnames for XIAO cameras** — set the ESP32 hostname in the Arduino sketch:
+```cpp
+WiFi.setHostname("xiao-pov");   // accessible as xiao-pov.local
+WiFi.setHostname("xiao-hand");  // accessible as xiao-hand.local
+```
+
+**Pi `.env`:**
+```
+POV_CAMERA_SOURCE=xiao:xiao-pov.local
+HAND_CAMERA_SOURCE=xiao:xiao-hand.local
+```
+
+These hostnames resolve on any network — no IP changes between home and exhibition.
 
 `MacWebcam` is untouched. Mac `.env` keeps `POV_CAMERA_SOURCE=mac:0`.
 
-**Pi `.env` entries to set:**
-```
-POV_CAMERA_SOURCE=xiao:192.168.1.X
-HAND_CAMERA_SOURCE=xiao:192.168.1.Y
-```
-
-**Verification:** Temporarily run `dual_pipeline.py` on Mac pointing at XIAO IPs (while XIAO is powered) to confirm MJPEG parsing works before moving to Pi.
+**Verification:** Temporarily run `dual_pipeline.py` on Mac pointing at XIAO mDNS names
+to confirm MJPEG parsing works before moving everything to Pi.
 
 ---
 
 ## Phase 3 — Hailo Detector Abstraction
 
-**Goal:** Swap YOLO backend at runtime via env var. Mac keeps ultralytics (unchanged). Pi uses Hailo.
+**Goal:** Swap YOLO backend via `YOLO_MODEL` file extension. Mac uses ultralytics unchanged. Pi uses Hailo.
 
 ### New file: `pipelines/hailo_detector.py`
 
-A `HailoDetector` class that wraps `hailo_platform` (HailoRT Python SDK) and presents the same
-interface as `ultralytics.YOLO`. Key shape:
+`HailoDetector` wraps `hailo_platform` (HailoRT SDK) and matches the ultralytics interface:
 
 ```python
 class HailoDetector:
@@ -122,10 +139,10 @@ class HailoDetector:
         return {i: n for i, n in enumerate(self._class_names)}
 ```
 
-The output must match what `_detect_yolo()` in `pov_pipeline.py` consumes:
+Output must match what `_detect_yolo()` in `pov_pipeline.py` consumes:
 `results[0].boxes` where each box has `.cls`, `.conf`, `.xyxy`.
 
-### Factory function: `pipelines/detector_factory.py`
+### New file: `pipelines/detector_factory.py`
 
 ```python
 def load_detector(model_path: str):
@@ -137,25 +154,30 @@ def load_detector(model_path: str):
         return YOLO(model_path)
 ```
 
-### Change in `pov_pipeline.py` (and `dual_pipeline.py`, `combined_pipeline.py`)
+### Change in `pov_pipeline.py`, `dual_pipeline.py`, `combined_pipeline.py`
 
-Replace `YOLO(YOLO_MODEL)` with `load_detector(YOLO_MODEL)`. That's it — `_detect_yolo()` is unchanged.
+Replace `YOLO(YOLO_MODEL)` with `load_detector(YOLO_MODEL)`. `_detect_yolo()` is unchanged.
 
-**`config/settings.py`** — no new setting needed; detection is inferred from `YOLO_MODEL` extension:
-- Mac `.env`: `YOLO_MODEL=yolov8n.pt` → ultralytics
-- Pi `.env`: `YOLO_MODEL=yolov8n.hef` → Hailo
+- Mac `.env`: `YOLO_MODEL=yolov8n.pt` → ultralytics path (no change)
+- Pi `.env`: `YOLO_MODEL=yolov8n.hef` → Hailo path
 
 ### Hailo model prep
 
-YOLOv8n is in Hailo's pre-compiled model zoo. Download the `.hef` directly from
-[github.com/hailo-ai/hailo_model_zoo](https://github.com/hailo-ai/hailo_model_zoo) → no
-DataFlow Compiler needed. Transfer `yolov8n.hef` to Pi project root.
+YOLOv8n `.hef` is available pre-compiled in Hailo's model zoo — no DataFlow Compiler needed.
+Download from `github.com/hailo-ai/hailo_model_zoo` and transfer to Pi project root.
 
-Install HailoRT on Pi via Hailo's official `.deb` package:
+Install HailoRT on Pi:
 ```bash
-# On Pi (after downloading hailo-rt from developer.hailo.ai)
-sudo dpkg -i hailort_*.deb
-pip install hailo_platform  # matches installed runtime version
+sudo dpkg -i hailort_*.deb          # from developer.hailo.ai
+pip install hailo_platform           # must match installed runtime version
+```
+
+Guard the import in `hailo_detector.py` with a clear error if run on Mac without hailo_platform:
+```python
+try:
+    import hailo_platform
+except ImportError:
+    raise ImportError("hailo_platform not installed — this detector only runs on Pi with Hailo HAT")
 ```
 
 ---
@@ -163,54 +185,98 @@ pip install hailo_platform  # matches installed runtime version
 ## Phase 4 — Pi Dependency Isolation
 
 Pi doesn't need `pywebview`, `mss`, `livekit-agents`, `AppKit/pyobjc`, or `pynput`.
-Mac shouldn't need `hailo_platform`.
 
 **`pyproject.toml`** — add optional dependency groups:
 
 ```toml
 [project.optional-dependencies]
-mac = ["pywebview", "mss", "livekit-agents[...]", "pynput"]
-pi  = []  # hailo_platform installed via .deb, not pip; mediapipe/opencv already in core
+mac = ["pywebview", "mss", "livekit-agents[cartesia,deepgram,google,silero]", "pynput"]
+pi  = []  # hailo_platform installed via .deb; mediapipe/opencv already in core deps
 ```
 
-Pi install: `uv sync` (core deps only) — no `--extra mac` flag.
-Mac install: `uv sync --extra mac` (already done; this just makes it explicit).
-
-For now, `hailo_platform` is NOT in pyproject.toml (installed system-wide via .deb on Pi).
-Guard the import in `hailo_detector.py` with a try/except so importing on Mac without
-hailo_platform raises a clear `ImportError` at load time, not at detection time.
+Pi install: `uv sync` (core only).
+Mac install: `uv sync --extra mac` (current behavior, now explicit).
 
 ---
 
 ## Phase 5 — Pi Deployment
 
-### Pi `.env` (project root on Pi)
+### Pi `.env`
 ```
-REDIS_HOST=192.168.1.X      # Mac's LAN IP
+REDIS_HOST=<mac-hostname>.local     # e.g. pratham-macbook.local  ← works on any network
 REDIS_PORT=6379
-POV_CAMERA_SOURCE=xiao:192.168.1.A
-HAND_CAMERA_SOURCE=xiao:192.168.1.B
+POV_CAMERA_SOURCE=xiao:xiao-pov.local
+HAND_CAMERA_SOURCE=xiao:xiao-hand.local
 YOLO_MODEL=yolov8n.hef
 SHOW_CAMERA=false
-HA_URL=http://192.168.1.6:8123
-HA_TOKEN=<same token>
 ```
-No LiveKit/Deepgram/Cartesia/Gemini keys needed on Pi — those stay Mac-only.
+No HA_URL/HA_TOKEN/LiveKit/Deepgram/Cartesia/Gemini keys on Pi.
 
 ### Process split
 
 | Process | Runs on | Command |
 |---|---|---|
-| `dual_pipeline.py` | Pi | `uv run python -m pipelines.dual_pipeline` |
+| `dual_pipeline.py` | **Pi** | `uv run python -m pipelines.dual_pipeline` |
 | `gesture_correlator.py` | Mac | `uv run python -m pipelines.gesture_correlator` |
 | `agent/main_loop.py` | Mac | `uv run python -m agent.main_loop` |
 | `laptop_app/main_pywebview.py` | Mac | `uv run python -m laptop_app.main_pywebview` |
 | `laptop_app/voice_agent.py` | Mac | `uv run python -m laptop_app.voice_agent start` |
-| `scripts/monitor_bus.py` | Mac | for dev only |
 
-### Startup script for Pi (future)
-Once stable: `scripts/start_pi.sh` with `uv run python -m pipelines.dual_pipeline &`.
-Can also set up a systemd unit for auto-start on Pi boot.
+### Startup script for Pi
+`scripts/start_pi.sh`:
+```bash
+#!/bin/bash
+cd /home/pi/Gary_2
+uv run python -m pipelines.dual_pipeline
+```
+Set as systemd service for auto-start on Pi boot (optional).
+
+---
+
+## Phase 6 — Exhibition Day Safety (mobile hotspot)
+
+Three things to do before the exhibition. None require code changes at the venue.
+
+### 6a. Match hotspot SSID/password to home WiFi (zero-reflash strategy)
+
+Set your phone's mobile hotspot SSID and password to **exactly the same values as your home
+WiFi**. All devices (Mac, Pi, both XIAOs) will auto-connect without any changes. This is
+the single most important prep step.
+
+### 6b. mDNS hostnames (already in the plan above)
+
+Because Phases 1 and 2 use `raspberrypi.local`, `xiao-pov.local`, `xiao-hand.local` instead
+of hardcoded IPs, DHCP address changes on the hotspot are invisible to the system. No `.env`
+edits needed at the venue.
+
+### 6c. HA graceful fallback
+
+Home Assistant lives at `192.168.1.6` — your home server, unreachable at the exhibition.
+Add a `try/except` in `tools/home_assistant.py` around the `aiohttp` call:
+
+```python
+except (aiohttp.ClientConnectionError, asyncio.TimeoutError):
+    await bus.publish(Event(type="show_toast", source="home_assistant",
+                            payload={"text": "Smart home not reachable here"}))
+    return
+```
+
+Gary gracefully says it can't reach the smart home instead of hanging or crashing.
+Voice, teaching mode, YouTube notes, gestures, and overlay all continue to work fine.
+
+### What works on hotspot (no changes needed)
+
+| Feature | Status |
+|---|---|
+| Voice agent (LiveKit/Deepgram/Gemini/Cartesia) | ✓ cloud, internet via hotspot |
+| Gary overlay UI | ✓ |
+| Teaching mode | ✓ |
+| YouTube notes | ✓ |
+| Screenshot capture | ✓ |
+| Gesture detection (pinch → correlator) | ✓ |
+| Redis Mac ↔ Pi | ✓ mDNS, same hotspot |
+| XIAO cameras streaming to Pi | ✓ same hotspot |
+| HA light / Fire TV control | ✗ gracefully fails with toast |
 
 ---
 
@@ -218,35 +284,35 @@ Can also set up a systemd unit for auto-start on Pi boot.
 
 - `laptop_app/` — zero edits
 - `agent/` — zero edits
-- `tools/` — zero edits
 - `events/schema.py` — zero edits
-- `bus/redis_bus.py` — only the `__init__` default values change (additive)
-- Mac's `.env` — no required new keys; existing keys stay as-is
-- All `Bus()` call sites — no edits needed (defaults cover them)
+- `bus/redis_bus.py` — only `__init__` default values change (additive)
+- Mac's `.env` — no required new keys
+- All 14 `Bus()` call sites — unchanged
 - `MacWebcam` class — untouched
 - `_detect_yolo()` function signature — untouched
-- `gesture_correlator.py` — zero edits (pure Redis subscriber, no hardware)
+- `gesture_correlator.py` — untouched
 
 ---
 
 ## Verification / End-to-End Test
 
-1. `scripts/monitor_bus.py` running on Mac — confirms Pi events arrive over LAN
-2. Flash both XIAO units; open `http://<ip>/stream` in browser — confirm MJPEG streams
-3. Run `dual_pipeline.py` on Pi, point ArUco marker at POV cam — `device_entered_view` appears in monitor
-4. Pinch in front of hand cam — `pinch_detected` then `gesture_command` appears
-5. Confirm HA toggle fires (light turns on/off)
-6. Spacebar hold on Mac → voice agent responds → Gary UI arc animates
-7. All existing Mac features (Fire TV, teaching, YouTube notes) continue to work unaffected
+1. `scripts/monitor_bus.py` on Mac — confirm Pi events arrive over LAN/hotspot
+2. Flash XIAO units with matching WiFi SSID/password and mDNS hostnames; open `http://xiao-pov.local/stream` in browser
+3. Run `dual_pipeline.py` on Pi, show ArUco marker to POV cam → `device_entered_view` in monitor
+4. Pinch in front of hand cam → `pinch_detected` then `gesture_command` appears
+5. Spacebar hold on Mac → voice agent responds → Gary arc animates
+6. Simulate no HA (unplug home hub) → Gary shows toast, doesn't crash
+7. Repeat steps 3–6 on mobile hotspot with same SSID
 
 ---
 
-## Implementation Order (safe-by-design)
+## Implementation Order
 
-1. Phase 1 (Redis network) — 5 min, zero risk, test immediately
-2. Phase 2 (XiaoStream) — implement + test on Mac first with XIAO on same WiFi
-3. Phase 3 (Hailo abstraction) — implement factory; Mac path unchanged since `yolov8n.pt` → ultralytics
-4. Phase 4 (Pi deps) — document/annotate pyproject.toml
-5. Phase 5 (Pi deploy) — clone repo on Pi, copy `.env`, run pipelines
+1. **Phase 1** — Redis network-aware (5 min, zero risk)
+2. **Phase 2** — XiaoStream with mDNS (test on Mac first while XIAO on WiFi)
+3. **Phase 3** — Hailo abstraction (Mac path unchanged throughout)
+4. **Phase 6c** — HA graceful fallback (small, safe, important for exhibition)
+5. **Phase 4** — Pi dep isolation in pyproject.toml
+6. **Phase 5** — Clone + deploy on Pi, configure `.env`, run pipelines
 
-Each phase is independently testable and mergeable. Mac never breaks between phases.
+Each phase is independently testable. Mac never breaks between phases.
