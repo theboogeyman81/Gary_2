@@ -49,11 +49,48 @@ _MODEL_URL = (
     "hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
 )
 _MODEL_PATH = Path(__file__).parent.parent / "hand_landmarker.task"
+
+# All 21-landmark connections for drawing the full hand skeleton
+_HAND_CONNECTIONS = [
+    (0, 1), (1, 2), (2, 3), (3, 4),          # thumb
+    (0, 5), (5, 6), (6, 7), (7, 8),           # index
+    (0, 9), (9, 10), (10, 11), (11, 12),      # middle
+    (0, 13), (13, 14), (14, 15), (15, 16),    # ring
+    (0, 17), (17, 18), (18, 19), (19, 20),    # pinky
+    (5, 9), (9, 13), (13, 17),                # palm
+]
+
 _THUMB_TIP = 4
+_INDEX_MCP = 5
 _INDEX_TIP = 8
 _WRIST = 0
 _MIDDLE_MCP = 9
 _EMA_ALPHA = 0.3  # higher = faster response, lower = heavier smoothing
+
+_SLIDE_PROXIMITY = 0.35
+_SLIDE_START_MIN_T = 0.55
+_SLIDE_MIN_TRAVEL = 0.30
+
+
+def _project_thumb_on_index(lm):
+    """Project thumb tip onto the MCP→TIP index finger axis.
+    Returns (t, perp_norm): t=0 at base, t=1 at tip;
+    perp_norm is off-axis distance as a fraction of finger length (scale-invariant).
+    """
+    mcp = lm[_INDEX_MCP]
+    tip = lm[_INDEX_TIP]
+    thumb = lm[_THUMB_TIP]
+    dx = tip.x - mcp.x
+    dy = tip.y - mcp.y
+    len_sq = dx * dx + dy * dy
+    if len_sq < 1e-6:
+        return 0.0, float("inf")
+    finger_len = math.sqrt(len_sq)
+    t = ((thumb.x - mcp.x) * dx + (thumb.y - mcp.y) * dy) / len_sq
+    proj_x = mcp.x + t * dx
+    proj_y = mcp.y + t * dy
+    perp_abs = math.hypot(thumb.x - proj_x, thumb.y - proj_y)
+    return t, perp_abs / finger_len
 
 
 def _hand_size(lm) -> float:
@@ -80,6 +117,12 @@ class _PinchState(Enum):
     OPEN = auto()
     HOLDING = auto()
     WAITING_RELEASE = auto()
+
+
+class _SlideState(Enum):
+    IDLE = auto()
+    TRACKING = auto()
+    FIRED = auto()
 
 
 async def _run_pov(bus: Bus, model: YOLO, cam: CameraSource) -> None:
@@ -187,6 +230,9 @@ async def _run_hand(
 ) -> None:
     state = _PinchState.OPEN
     pinch_start: float | None = None
+    slide_state = _SlideState.IDLE
+    slide_start_t = 0.0
+    slide_min_t = 1.0
     ema_dist: float | None = None
     loop_start = time.monotonic()
     _hand_window_placed = False
@@ -244,6 +290,41 @@ async def _run_hand(
                 pinch_start = None
                 print("[dual/hand] Pinch released — re-armed")
 
+        # --- Slide gesture: thumb down the index finger ---
+        if result.hand_landmarks:
+            lm = result.hand_landmarks[0]
+            t, perp = _project_thumb_on_index(lm)
+            print(f"[slide] t={t:.2f} perp={perp:.2f} state={slide_state.name}")
+            if perp < _SLIDE_PROXIMITY and -0.1 <= t <= 1.3:
+                if slide_state == _SlideState.IDLE:
+                    if t >= _SLIDE_START_MIN_T:
+                        slide_state = _SlideState.TRACKING
+                        slide_start_t = t
+                        slide_min_t = t
+                        print(f"[slide] TRACKING started at t={t:.2f}")
+                elif slide_state == _SlideState.TRACKING:
+                    slide_min_t = min(slide_min_t, t)
+                    travel = slide_start_t - slide_min_t
+                    print(f"[slide] travel={travel:.2f} (need {_SLIDE_MIN_TRAVEL})")
+                    if travel >= _SLIDE_MIN_TRAVEL:
+                        await bus.publish(Event(
+                            type="slide_detected",
+                            source="hand_pipeline",
+                            payload={"confidence": round(float(confidence), 3), "hand": hand_label},
+                        ))
+                        print(f"[dual/hand] slide_detected ({hand_label})")
+                        slide_state = _SlideState.FIRED
+            else:
+                if slide_state != _SlideState.IDLE:
+                    print(f"[slide] reset (perp={perp:.2f} t={t:.2f})")
+                slide_state = _SlideState.IDLE
+                slide_start_t = 0.0
+                slide_min_t = 1.0
+        else:
+            slide_state = _SlideState.IDLE
+            slide_start_t = 0.0
+            slide_min_t = 1.0
+
         if SHOW_CAMERA:
             display = frame.copy()
             h, w = display.shape[:2]
@@ -253,16 +334,27 @@ async def _run_hand(
                 _PinchState.WAITING_RELEASE: (0, 0, 255),
             }
             color = state_colors[state]
-            if result.hand_landmarks and ema_dist is not None:
+            if result.hand_landmarks:
                 lm = result.hand_landmarks[0]
+                # Draw full hand skeleton — all 21 landmarks
+                for start_idx, end_idx in _HAND_CONNECTIONS:
+                    sx = int(lm[start_idx].x * w)
+                    sy = int(lm[start_idx].y * h)
+                    ex = int(lm[end_idx].x * w)
+                    ey = int(lm[end_idx].y * h)
+                    cv2.line(display, (sx, sy), (ex, ey), (0, 180, 0), 1)
+                for landmark in lm:
+                    cx = int(landmark.x * w)
+                    cy = int(landmark.y * h)
+                    cv2.circle(display, (cx, cy), 4, (0, 255, 0), -1)
+                # Highlight pinch fingers
                 tx, ty = int(lm[_THUMB_TIP].x * w), int(lm[_THUMB_TIP].y * h)
                 ix, iy = int(lm[_INDEX_TIP].x * w), int(lm[_INDEX_TIP].y * h)
-                cv2.circle(display, (tx, ty), 10, (0, 255, 0), -1)
-                cv2.circle(display, (ix, iy), 10, (0, 0, 255), -1)
+                cv2.circle(display, (tx, ty), 8, (0, 80, 255), -1)
+                cv2.circle(display, (ix, iy), 8, (255, 80, 0), -1)
                 cv2.line(display, (tx, ty), (ix, iy), color, 2)
                 cv2.putText(display, f"{state.name} d={ema_dist:.3f}", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-                # Progress bar — visible only while holding
                 if state == _PinchState.HOLDING and pinch_start is not None:
                     progress = min((now - pinch_start) / PINCH_HOLD_DURATION, 1.0)
                     bar_x, bar_y, bar_w, bar_h = 10, h - 40, 300, 20

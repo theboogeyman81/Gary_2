@@ -16,43 +16,84 @@ Run list_cameras to identify which camera index is which:
     uv run python -m scripts.list_cameras
 
 
-FULL GESTURE PIPELINE (4 terminals)
+FULL GESTURE PIPELINE (5 terminals)
 -------------------------------------
 
 Terminal 1 — monitor all bus events (see everything happening):
     uv run python -m scripts.monitor_bus
 
-Terminal 2 — dual pipeline (both cameras: YOLO/ArUco + hand tracking):
+Terminal 2 — laptop UI (popup/toast overlay):
+    uv run python -m laptop_app.main_pywebview
+
+Terminal 3 — dual pipeline (both cameras: YOLO/ArUco + hand tracking):
     uv run python -m pipelines.dual_pipeline
 
-Terminal 3 — gesture correlator (joins device_in_view + pinch → gesture_command):
+Terminal 4 — gesture correlator (joins device_in_view + pinch/slide → gesture_command):
     uv run python -m pipelines.gesture_correlator
 
-Terminal 4 — agent main loop (receives gesture_command → toggles HA bulb):
+Terminal 5 — agent main loop (receives gesture_command → shows toast + attempts HA):
     uv run python -m agent.main_loop
 
 
-EXPECTED EVENT FLOW
---------------------
-1. Hold ArUco sticker (id=3) in front of camera 0 (POV camera)
-   → monitor shows: device_entered_view {device_id: light.smart_bulb_12_5w_2}
+HAND PIPELINE ONLY (testing pinch/slide without POV camera)
+-------------------------------------------------------------
+Terminal 1 — monitor:
+    uv run python -m scripts.monitor_bus
 
-2. Hold pinch in front of camera 1 (hand camera) for ~0.6s
+Terminal 2 — hand only:
+    uv run python -m pipelines.hand_pipeline
+
+Terminal 3 — agent main loop:
+    uv run python -m agent.main_loop
+
+
+EXPECTED EVENT FLOW — PINCH (toggle)
+--------------------------------------
+1. Hold ArUco sticker in front of camera 0 (POV camera)
+   → monitor shows: device_entered_view {device_id: ..., friendly_name: ...}
+
+2. Hold pinch (thumb + index tip together) for ~0.6s in front of camera 1
    → monitor shows: pinch_detected
-   → monitor shows: gesture_command
-   → monitor shows: device_action (bulb toggles)
+   → monitor shows: gesture_command  {gesture: "pinch"}
+   → monitor shows: show_toast       {message: "Smart Bulb — turned on"}
+   → laptop overlay shows toast notification
+
+EXPECTED EVENT FLOW — SLIDE (brightness / volume)
+---------------------------------------------------
+1. Hold ArUco sticker in front of camera 0 (POV camera)
+   → monitor shows: device_entered_view
+
+2. Place thumb near the TIP of index finger, then slide DOWN toward the knuckle
+   → monitor shows: slide_detected
+   → monitor shows: gesture_command  {gesture: "slide_down"}
+   → monitor shows: show_toast       {message: "Smart Bulb — brightness 80%"}
+   → laptop overlay shows toast notification
+
+
+ARUCO STICKER IDs  (DICT_4X4_50 — print at chev.me/arucogen)
+--------------------------------------------------------------
+ID 1  →  Smart Bulb 2      (light.smart_bulb_2)
+ID 2  →  Floor Lamp        (light.floor_lamp)
+ID 3  →  Smart Bulb        (light.smart_bulb_12_5w_2)   ← existing sticker
+ID 4  →  TV                (media_player.demo_tv)
+
+
+PINCH TUNING (in .env or config/settings.py)
+---------------------------------------------
+PINCH_ENTER_THRESHOLD=0.10   # how close fingers must be to start (lower = tighter squeeze needed)
+PINCH_EXIT_THRESHOLD=0.13    # how wide to open to cancel/re-arm
+PINCH_HOLD_DURATION=0.6      # seconds to hold before firing
+
+SLIDE TUNING (in pipelines/hand_pipeline.py constants)
+-------------------------------------------------------
+_SLIDE_PROXIMITY=0.35        # how close thumb must be to index finger axis (fraction of finger length)
+_SLIDE_START_MIN_T=0.55      # thumb must start in upper half of finger (0=base, 1=tip)
+_SLIDE_MIN_TRAVEL=0.30       # fraction of finger length that must be travelled to fire
 
 
 TEST HA CONNECTION
 -------------------
     uv run python -m scripts.test_ha
-
-
-PINCH TUNING (in .env)
-------------------------
-PINCH_ENTER_THRESHOLD=0.05   # how tight the pinch must be to start (lower = tighter)
-PINCH_EXIT_THRESHOLD=0.09    # how wide to open to cancel/re-arm (higher = more open)
-PINCH_HOLD_DURATION=0.6      # seconds to hold before firing
 
 
 GIT
@@ -66,9 +107,3 @@ Commit changes:
 
 Push branch:
     git push origin <branch-name>
-
-
-
-
-uv run python -m laptop_app.voice_agent
-  console --input-device 1 --output-device 2

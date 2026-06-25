@@ -20,6 +20,30 @@ devices:
       aruco_id: 3
       yolo_class: null
 
+  - ha_entity_id: light.smart_bulb_2
+    friendly_name: Smart Bulb 2
+    area: bedroom
+    vision:
+      method: aruco
+      aruco_id: 1
+      yolo_class: null
+
+  - ha_entity_id: light.floor_lamp
+    friendly_name: Floor Lamp
+    area: living_room
+    vision:
+      method: aruco
+      aruco_id: 2
+      yolo_class: null
+
+  - ha_entity_id: media_player.demo_tv
+    friendly_name: TV
+    area: living_room
+    vision:
+      method: aruco
+      aruco_id: 4
+      yolo_class: null
+
   - ha_entity_id: media_player.living_room_tv
     friendly_name: living room TV
     area: living_room

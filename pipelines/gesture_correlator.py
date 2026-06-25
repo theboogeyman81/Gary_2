@@ -42,15 +42,15 @@ async def run(bus: Bus) -> None:
             in_view.pop(did, None)
             print(f"[correlator] in_view -{did} (total: {len(in_view)})")
 
-        elif event.type == "pinch_detected":
+        elif event.type in ("pinch_detected", "slide_detected"):
             if not in_view:
-                print("[correlator] Pinch — no device in view, dropped")
+                print(f"[correlator] {event.type} — no device in view, dropped")
                 continue
 
             now_ms = time.monotonic() * 1000
             if now_ms - last_fire_time < GESTURE_COOLDOWN_MS:
                 remaining = GESTURE_COOLDOWN_MS - (now_ms - last_fire_time)
-                print(f"[correlator] Pinch — cooldown active ({remaining:.0f}ms remaining), dropped")
+                print(f"[correlator] {event.type} — cooldown active ({remaining:.0f}ms remaining), dropped")
                 continue
 
             # Pick device with largest bbox area (w * h)
@@ -61,6 +61,7 @@ async def run(bus: Bus) -> None:
             )
             best = in_view[best_id]
 
+            is_slide = event.type == "slide_detected"
             last_fire_time = now_ms
             await bus.publish(Event(
                 type="gesture_command",
@@ -68,11 +69,11 @@ async def run(bus: Bus) -> None:
                 payload={
                     "device_id": best_id,
                     "friendly_name": best.get("friendly_name", best_id),
-                    "gesture": "pinch",
-                    "implied_intent": "toggle",
+                    "gesture": "slide_down" if is_slide else "pinch",
+                    "implied_intent": "reduce" if is_slide else "toggle",
                 },
             ))
-            print(f"[correlator] gesture_command → {best.get('friendly_name', best_id)}")
+            print(f"[correlator] gesture_command ({event.type}) → {best.get('friendly_name', best_id)}")
 
 
 async def main() -> None:
