@@ -1,0 +1,760 @@
+================================================================================
+GARY — FULL PRODUCT BRAINSTORM & PLAN
+================================================================================
+Session date: 2026-07-01
+Status: Brainstorm / pre-implementation
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 1 — FEATURE ROADMAP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Priority order (by impact):
+
+  1. Persistent memory across sessions
+     - SQLite/JSON store of facts Gary learns
+     - "I'm working on React", "standup at 10am"
+     - Pairs with existing tools/memory.py
+     - Survives session restarts
+
+  2. Meeting mode
+     - Auto-detect Zoom/Meet/Teams as active window
+     - Transcribe call → running summary in overlay
+     - Generate action items at hangup
+     - Highest exhibition wow factor
+
+  3. Mac .app bundle
+     - PyInstaller (--windowed --onefile)
+     - Bundle Python + .venv + pywebview
+     - Menu bar icon via `rumps` (replaces spacebar hold)
+     - LaunchAgent plist for auto-start on boot
+     - Signed .app required for exhibition credibility
+
+  4. Streaming TTS latency fix
+     - Cartesia + ElevenLabs both support chunk-streaming
+     - LiveKit AgentSession handles this natively
+     - Gary starts speaking before full response is generated
+     - Biggest single latency win
+
+  5. Proactive surface
+     - Gary notices things without being asked
+     - Upcoming meeting → show_toast
+     - Publishes events on a poll loop
+     - "Ambient presence" fully realized
+
+  6. Drag-to-ask
+     - User selects text anywhere on screen
+     - Gary explains / translates
+     - macOS Accessibility API + global hotkey
+     - No glasses required
+
+  7. Glasses camera feed → Gemini Vision
+     - ESP32 stream already exists
+     - "What am I looking at" from physical world
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 2 — LATENCY OPTIMIZATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Current pipeline: mic → Deepgram → Gemini → ElevenLabs → speaker (~1.5–3s)
+
+Levers:
+  - Enable streaming TTS (Cartesia/ElevenLabs chunk mode)   → largest win
+  - Switch to gemini-2.0-flash for tool-heavy calls         → faster simple actions
+  - Silero VAD for end-of-speech detection                  → no silence timeout
+  - Cache common TTS phrases ("Got it", "On it", "Sure")    → small, zero-effort
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 3 — CLOUD vs FINE-TUNING DECISION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Don't fine-tune yet. Reasons:
+  - System prompt handles personality and tool routing well
+  - Gemini 2.5 Flash is capable enough for current use
+  - No curated training data exists yet
+  - Wrong tool calls → fix the prompt first, not the model
+
+Do instead:
+  - RAG over user context (calendar, notes, prefs) injected per turn
+  - Audit tool call miss rate → prompt fixes before model changes
+
+Revisit fine-tuning: when shipping to users at scale needing consistent
+brand voice or specialized domain knowledge.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 4 — HARDWARE PATHS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────
+PATH 1 — XIAO + 3D PRINTED MOUNT (Now → July exhibition)
+────────────────────────────────────────
+
+Don't design a custom PCB before July.
+
+  Part                              Cost
+  ────────────────────────────────  ────
+  XIAO ESP32-S3 Sense ×2           $30
+  Cheap glasses frame (Amazon)     $8–15
+  3D printed temple mount          $5–15
+  150mAh LiPo + TP4056 + switch   $8–12
+  ─────────────────────────────    ────
+  Total                            ~$50–70
+
+Timeline: 1–2 weeks
+
+────────────────────────────────────────
+PATH 2 — CUSTOM ESP32-S3 PCB (Post-exhibition, v1 product)
+────────────────────────────────────────
+
+2 boards per glasses (right temple + left temple) connected by FPC ribbon.
+
+Electronics BOM per unit:
+  Component          Part                     Cost
+  ─────────────────  ───────────────────────  ────
+  MCU                ESP32-S3-WROOM-1         $3.50
+  POV Camera         OV5640 wide-angle + FPC  $6–8
+  Radar (gestures)   Infineon BGT60TR13C      $5–8   ← replaces hand camera
+  Audio out          Bone conduction piezo    $8–12
+  Amp                MAX98357A I2S            $1.50
+  Mics               ICS-43434 PDM MEMS ×2   $2.00
+  Battery charger    BQ24079                  $1.50
+  Batteries          LiPo 150mAh slim ×2     $8–12
+  Touch              AT42QT1010 cap IC        $0.80
+  IMU                MPU-6050 (v1.1)          $0.80
+  USB-C              Charging + UART flash    $0.30
+  Privacy LED        RGB                      $0.30
+  FPC + passives     —                        $4–6
+  ─────────────────────────────────────────   ────
+  Total BOM                                   $42–66/unit
+
+PCB (JLCPCB, 10 units):
+  PCB design (KiCad, your time or freelancer)  $0 or $800–2,000
+  PCB fab + PCBA (10 units = 20 boards)        $400–700
+  Per-unit PCB cost                            $40–70
+
+Frame options:
+  Off-shelf frame + 3D printed inserts   $20–40/unit   Exhibition-grade
+  SLA 3D printed custom frame            $40–80/unit   Good demo quality
+  Wenzhou OEM injection molded           $12–25/unit   Product quality
+                                         + $5K–15K tooling (MOQ 100–500)
+
+Total per unit (10-unit batch): $102–216
+Timeline: 6–10 weeks PCB → assembled in hand
+
+────────────────────────────────────────
+PATH 3 — RIGID-FLEX GLASSES PCB (v2 product, 6+ months)
+────────────────────────────────────────
+
+Skip for now. $500–1,200 first run. Only when pitching investors
+or going to manufacturing. Needs final frame dimensions locked.
+
+────────────────────────────────────────
+WHAT LOOKS LIKE META RAY-BAN (the target)
+────────────────────────────────────────
+
+Meta Ray-Ban reference spec:
+  Chip            Snapdragon AR1 Gen 1 (custom Qualcomm)
+  Camera          12MP, wide angle, front-facing (nose bridge)
+  Mics            5x MEMS (beamforming)
+  Speakers        2x open-ear directional (custom acoustic chambers)
+  Connectivity    BT 5.3 + WiFi 6
+  Battery         ~154mAh per temple, total ~300mAh
+  Touch           Capacitive strip on right temple
+  Privacy LED     Right front corner
+  Weight          ~49g
+
+Gary v1 differences vs Meta:
+  - No open-ear speakers → bone conduction (easier to integrate)
+  - No Qualcomm chip → ESP32-S3 (tethered to phone instead of standalone)
+  - 2 mics instead of 5 (no beamforming — adequate for Gary's use)
+  - Radar (Soli-style) instead of hand camera for gestures
+  - Target weight: 55–70g (slightly heavier, acceptable)
+
+────────────────────────────────────────
+CAMERA
+────────────────────────────────────────
+
+OV5640 with wide-angle 120° M12 lens
+  - 5MP, autofocus
+  - ~8mm sensor module
+  - $6–8
+  - WiFi bandwidth is the bottleneck, not the sensor
+
+No second camera needed — Soli radar handles gestures.
+
+────────────────────────────────────────
+GESTURE: PROJECT SOLI / RADAR (replaces hand camera entirely)
+────────────────────────────────────────
+
+Chip: Infineon BGT60TR13C (60GHz millimeter-wave radar)
+  - 1 TX, 3 RX antennas
+  - Sub-millimeter precision
+  - Up to 2,000 samples/second
+  - ~$5–8 on Mouser/DigiKey
+  - Arduino/ESP32 SDK available from Infineon
+  - ~200mW active (vs ~500mW+ for camera + ML)
+
+What it detects reliably (90%+):
+  Gesture              Gary action
+  ───────────────────  ────────────────────────────
+  Pinch                Wake / confirm
+  Double pinch         Mode switch
+  Hold pinch (>500ms)  Push to talk / long press
+  Swipe right          Next / skip / dismiss
+  Swipe left           Back
+  Swipe up             Volume up / scroll up / brighter
+  Swipe down           Volume down / scroll down / dimmer
+  Air tap              Single select
+  Grab (close fist)    Stop / cancel
+
+Brightness slider gesture (thumb sliding along index finger):
+  - This is Soli's SIGNATURE gesture ("rub" / micro-slide)
+  - Radar detects Doppler shift of thumb moving on index finger
+  - ~80–85% accuracy in real-world use
+  - Flaws:
+      · Intent detection: radar can't tell deliberate slide from
+        natural finger rubbing — fix with pinch-first-to-enter-mode
+      · No absolute position: only increment/decrement, not "jump to 70%"
+      · Works best at 15–50cm from glasses
+      · Very slow slides = noise (minimum velocity threshold needed)
+      · Accuracy drops to ~70–75% while walking (body motion noise)
+  - Design fix: pinch → slide → release pinch to confirm
+
+What radar CAN'T do:
+  - Track individual fingers precisely (camera/depth sensor territory)
+  - Distinguish left/right hand reliably (needs more antennas)
+  - Work well beyond ~80cm for fine gestures
+
+Architecture change from radar:
+  Before: hand camera → MJPEG → phone → MediaPipe → gesture event (~20–30ms)
+  After:  radar chip → SPI → ESP32 → BLE → gesture event (~5ms)
+
+Hardware skip list for MVP:
+  Open-ear speakers       Skip — needs tuned acoustic chambers, use bone conduction
+  GPS / compass           Skip
+  On-device AI inference  Skip — stream to phone/cloud
+  Rigid-flex PCB          Skip — 3D mount achieves same result
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 5 — FULL CLOUD ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Why full cloud (no Raspberry Pi):
+  - Eliminates Pi + Hailo HAT (~$250/deployment)
+  - No customer-side infrastructure
+  - Scales to many users
+  - Models improve without hardware updates
+  - Enables subscription revenue model
+
+Architecture:
+
+  [Glasses — ESP32-S3]
+    OV5640 camera → MJPEG over WiFi (local network to phone)
+    MEMS mics → audio over WiFi/BLE
+    Bone conduction ← audio from phone (BLE)
+    Soli radar → BLE gesture events to phone
+    Touch strip → BLE tap events to phone
+
+  [Phone — iOS companion app]
+    MediaPipe Hands: gesture detection @ 30fps (LOCAL, ~15ms)  [if radar not used]
+    YOLOv8n CoreML: object detection (LOCAL, ~20ms)
+    ArUco OpenCV: device markers (LOCAL, ~8ms)
+    SmartHomeManager: HA + HomeKit + Hue (LOCAL network)
+    ContextProvider: calendar, location, contacts (LOCAL device)
+    VoiceSession: LiveKit audio pipeline (CLOUD)
+    GaryClient: WebSocket event bus (CLOUD)
+
+  [Cloud — Gary backend]
+    Gary agent (Gemini 2.5 Flash + tools + memory)
+    LiveKit (voice session routing)
+    Deepgram (STT)
+    Cartesia (TTS — NOT ElevenLabs, see cost)
+    Gemini Vision (on-demand single frames only, never continuous)
+    Postgres (user memory, preferences, conversation summaries)
+    Stripe (subscription billing)
+
+What the phone processes locally (zero cloud cost per call):
+  - Radar gesture events: ESP32 handles, phone just receives
+  - Object detection (YOLO CoreML): every frame, free
+  - ArUco markers (OpenCV): every frame, free
+  - Smart home commands: local network, free
+  - Context (calendar/location): local device, free
+
+What goes to cloud:
+  - Audio (voice sessions): LiveKit → Deepgram → Gemini → Cartesia
+  - LLM reasoning: Gemini 2.5 Flash per turn
+  - Scene description: single JPEG frame on demand only
+  - Event stream: tiny JSON events up, commands down
+
+Monthly cost per user:
+  Service                           Cost/user/month
+  ─────────────────────────────     ───────────────
+  LiveKit Cloud                     ~$1.50
+  Deepgram STT (30 min/day)         ~$3.90
+  Cartesia TTS (2,000 chars/day)    ~$3.90
+  Gemini Vision (5–10 calls/day)    ~$0.30
+  Gemini LLM (2.5 Flash)            ~$1–3
+  Backend server (shared)           ~$1–5
+  Total                             ~$12–18/user/month
+
+  NOTE: ElevenLabs = ~$18/user/month for TTS alone → use Cartesia (78% cheaper)
+
+Suggested subscription price: $24–29/month (~40–60% gross margin at scale)
+
+Hardware cost per unit (full cloud, no Pi):
+  Glasses electronics    $42–66
+  PCB fab + assembly     $40–70
+  Frame                  $20–80
+  Pi + Hailo (removed)   $0     (was $250)
+  Total per unit         $102–216
+
+Model conversion (one-time):
+  yolo export model=yolov8n.pt format=coreml    # → iOS
+  yolo export model=yolov8n.pt format=tflite    # → Android (future)
+  MediaPipe Tasks Swift bundles its own models — no conversion needed
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 6 — HOME ASSISTANT IN CLOUD ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problem: Gary cloud can't reach user's HA at 192.168.1.6 — it's behind NAT.
+
+Solution (Phase 1, launch): Phone as HA relay
+  Gary cloud → "turn on kitchen lights" → WebSocket → Phone
+  Phone (on home WiFi) → http://192.168.1.6:8123 → HA → done
+
+  "Am I home?" detection: CoreLocation geofence set during onboarding
+  When away: route via Nabu Casa URL or fail gracefully
+
+Solution (Phase 2): Nabu Casa
+  User subscribes to HA Cloud (~$6.50/month)
+  Provides public HTTPS URL → Gary cloud calls directly
+  Enables remote control when away from home
+
+Users without Home Assistant:
+  Platform        API                          What you get
+  ─────────────   ──────────────────────────   ──────────────────────────
+  Apple HomeKit   HomeKit framework (iOS)      Lights, locks, thermostat
+  Matter          MatterSupport (iOS 16+)      Cross-platform devices
+  Philips Hue     Hue local API (same LAN)     Lights without HA
+
+Security: HA long-lived token stored in iOS Keychain only.
+Never sent to Gary cloud backend. Phone makes the call, sends only result up.
+
+User onboarding setup:
+  Smart Home Setup
+  ├─ [Connect Home Assistant]   ← local URL + token
+  ├─ [Connect Apple Home]       ← one tap
+  ├─ [Connect Philips Hue]      ← auto-discovers on LAN
+  └─ [Skip for now]
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 7 — PHONE APP ARCHITECTURE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Tech stack:
+  Layer              Framework
+  ─────────────────  ────────────────────────────────────
+  UI                 SwiftUI + @Observable
+  BLE                CoreBluetooth
+  WiFi / WebSocket   Network framework (URLSessionWebSocketTask)
+  Camera stream      AVFoundation + custom MJPEG parser
+  MediaPipe          MediaPipe Tasks Swift (official SDK)
+  YOLO               CoreML + Vision framework
+  ArUco              OpenCV (C++ → Swift via ObjC wrapper)
+  Voice              LiveKit iOS SDK
+  HomeKit            HomeKit framework
+  Calendar           EventKit
+  Location           CoreLocation (CLCircularRegion geofence)
+  Contacts           Contacts framework
+  Subscriptions      StoreKit 2
+  Secrets            Keychain
+  Dynamic Island     ActivityKit (Live Activities)
+
+────────────────────────────────────────
+MODULE: GlassesManager
+────────────────────────────────────────
+Owns physical connection to ESP32. Two channels:
+  BLE:  touch events, battery level, LED commands, bone conduction audio
+        → works in background
+  WiFi: MJPEG camera stream → foregrounded only
+
+State machine:
+  Disconnected → Scanning → BLE Connected → Streaming → (auto-reconnect on drop)
+
+────────────────────────────────────────
+MODULE: VisionEngine
+────────────────────────────────────────
+ML inference on every MJPEG frame. All local. Background DispatchQueue only.
+
+  Model             Framework            Latency   Output
+  ────────────────  ───────────────────  ────────  ─────────────────────────
+  MediaPipe Hands   MediaPipe Tasks      ~15ms     21 landmarks per hand
+  YOLOv8n           CoreML + Vision      ~20ms     Bounding boxes + classes
+  ArUco             OpenCV C++ bridge    ~8ms      Marker ID + pose
+
+────────────────────────────────────────
+MODULE: GestureRecognizer
+────────────────────────────────────────
+Converts radar BLE events (or MediaPipe landmarks) into Gary commands.
+Stateful — tracks gesture history. Debounce prevents multi-fire.
+
+  Gestures: pinch, double_pinch, hold_pinch, swipe_left, swipe_right,
+            swipe_up, swipe_down, air_tap, grab
+
+────────────────────────────────────────
+MODULE: VoiceSession
+────────────────────────────────────────
+Wraps LiveKit. Full voice pipeline.
+
+  Pinch → activate()
+  → LiveKit room opens
+  → AVAudioEngine captures mic
+  → Deepgram STT
+  → Gemini LLM
+  → Cartesia TTS
+  → audio streamed back → bone conduction via BLE
+  → silence → deactivate()
+
+────────────────────────────────────────
+MODULE: GaryClient (WebSocket)
+────────────────────────────────────────
+Phone → Cloud events (small, frequent):
+  gestureDetected     tiny, many per session
+  objectsInView       YOLO results
+  deviceSeen          ArUco marker ID
+  contextUpdate       calendar/location snapshot
+  frameForVision      single JPEG, on-demand only — NOT continuous
+
+Cloud → Phone commands (occasional):
+  homeAssistantCall   service, entityID, data
+  requestFrame        Gary wants to see camera now
+  showOverlay         text to display
+  playAudio           TTS audio URL
+
+────────────────────────────────────────
+MODULE: SmartHomeManager
+────────────────────────────────────────
+Routes home commands to right backend:
+  Is it HomeKit? → HomeKit framework
+  Is it HA entity? → HA (local if home, Nabu Casa if away)
+  Is it Hue? → Hue bridge local API
+
+────────────────────────────────────────
+MODULE: ContextProvider
+────────────────────────────────────────
+Proactively injects user context into every Gary cloud call.
+
+  UserContext {
+    upcomingEvents: [CalendarEvent]    ← EventKit, next 3
+    location: String                   ← "home" / "office"
+    timeOfDay: String                  ← morning / afternoon / evening
+    devicesSeen: [Int]                 ← ArUco marker IDs in view
+  }
+
+Sent with every LLM call. Gary always knows what the user is doing.
+
+────────────────────────────────────────
+MODULE: AppState
+────────────────────────────────────────
+Single source of truth. All SwiftUI views observe only this.
+Managers don't talk to each other directly — go through AppState.
+
+────────────────────────────────────────
+BACKGROUND EXECUTION
+────────────────────────────────────────
+Info.plist UIBackgroundModes:
+  bluetooth-central   BLE to glasses always works
+  audio               voice session survives background
+  location            geofencing for home detection
+
+  Feature                    Background   Foreground
+  ─────────────────────────  ──────────   ──────────
+  BLE touch/gesture events   Yes          Yes
+  Radar gesture events        Yes          Yes
+  MJPEG + vision (YOLO etc)  No           Yes
+  Voice session (LiveKit)    Yes          Yes
+  Smart home commands        Yes          Yes
+  Geofencing                 Yes          Yes
+
+────────────────────────────────────────
+iOS SURFACES
+────────────────────────────────────────
+  Dynamic Island   Listening / thinking / speaking state arc
+  Live Activities  Lock screen status during voice session
+  Widgets          Quick status, last Gary response
+  Siri Shortcuts   "Hey Siri, ask Gary..." fallback
+
+────────────────────────────────────────
+UI PHILOSOPHY
+────────────────────────────────────────
+Minimal. "A presence, not an app."
+  - Small status dot + state label
+  - Glasses battery / signal indicators
+  - NO buttons — interaction via glasses touch strip or radar gesture
+  - No hamburger menus, no dashboards
+
+────────────────────────────────────────
+BUILD ORDER (12 weeks)
+────────────────────────────────────────
+  Weeks 1–2    GlassesManager: BLE + MJPEG → video on phone screen
+  Weeks 3–4    VisionEngine + GestureRecognizer → pinch fires event
+  Weeks 5–6    VoiceSession (LiveKit) → pinch → Gary speaks back
+  Weeks 7–8    GaryClient (WebSocket) + cloud backend → tools work
+  Weeks 9–10   SmartHomeManager + ContextProvider → calendar + home control
+  Weeks 11–12  Dynamic Island, onboarding, StoreKit 2, polish
+
+Gary is functional and speakable by Week 6. Everything after is depth.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 8 — DATA STORAGE & PRIVACY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+GOLDEN RULE: Streaming data never touches disk. Only derived results persist.
+
+What flows and what happens to it:
+
+  Camera stream (MJPEG):
+    Frame → VisionEngine → result extracted → frame discarded
+    Lives in 3–5 frame ring buffer in RAM (~250KB max)
+    NEVER written to disk
+    Risk: accidental write() = 1.5MB/second = 5.4GB/hour
+
+  Audio (mic → LiveKit):
+    PCM buffer in RAM → LiveKit → cloud → Deepgram
+    Buffer released after send
+    NEVER written to disk
+    Risk: debug audio logger = ~10MB/minute
+
+  Frames sent to Gemini Vision:
+    Single JPEG grabbed on demand → cloud → description returned → JPEG discarded
+    Lives in memory ~1 second
+    Cloud: Google doesn't store Vision API inputs by default
+    Your backend: never persist the image, only the text description
+
+  Gesture / object events:
+    Tiny JSON (~100 bytes per event) → WebSocket → cloud
+    Negligible
+
+  LLM conversation:
+    Text only → Postgres
+    ~20KB/day for heavy Gary use
+    ~5MB per user per year
+
+What DOES accumulate (acceptable, managed):
+  ML models on phone (CoreML + MediaPipe)   ~40MB, fixed, one-time
+  App logs (capped, rotated)                <50MB
+  User prefs / HA token (Keychain)          <1KB
+  Gary memory in Postgres                   ~100KB per user lifetime
+  Conversation summaries in Postgres        ~5MB per user per year
+
+What NEVER gets stored:
+  Raw MJPEG frames
+  Raw audio PCM from mic
+  Full conversation audio recordings
+  Continuous vision results at 30fps
+  Gemini Vision images (process and discard immediately)
+  Full LLM conversation turns (only summaries kept)
+
+iOS directory strategy:
+  Documents/    Persistent, iCloud backup    → user-created content only
+  Caches/       iOS clears when low storage  → ML models, temp assets
+  tmp/          Cleared on restart           → session-only data
+
+Top storage risks ranked:
+  1. Frames accidentally written to disk     CATASTROPHIC  → never call write() in frame pipeline
+  2. Audio debug logs left on in prod        BAD           → in-memory logging only, rotate
+  3. Full audio stored for "quality review"  EXPENSIVE     → store transcripts only
+  4. Vision images cached on backend         MEDIUM        → process and discard immediately
+  5. Verbose vision output in app logs       MEDIUM        → cap at 50MB, rotate
+
+Privacy product angle:
+  "Gary doesn't store your camera feed or audio" → design feature, not just tech detail
+  Camera: frames processed on-device, never stored or transmitted
+          (except single frames explicitly requested by user)
+  Audio: transcribed in cloud (Deepgram), transcript summarized,
+         raw audio discarded immediately
+  This is a real differentiator vs Nest / Alexa
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 9 — COMPLETE PRODUCT WORKFLOW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+────────────────────────────────────────
+STARTUP & CONNECTION (~4–5 seconds)
+────────────────────────────────────────
+  ESP32 boots (~2s) → BLE advertisement
+  Phone (background) sees advertisement
+  CoreBluetooth connects (~300ms)
+  BLE handshake: WiFi credentials if needed
+  ESP32 joins home WiFi (~1s)
+  Phone opens MJPEG socket → http://glasses.local/stream
+  VisionEngine starts processing frames
+  GaryClient WebSocket → cloud backend
+  ContextProvider pulls calendar, location, contacts
+  Glasses LED: brief green pulse → Gary is live
+
+────────────────────────────────────────
+IDLE STATE
+────────────────────────────────────────
+  Glasses stream MJPEG 15fps → phone VisionEngine
+  YOLO detects objects in scene → WebSocket → cloud (Gary notes context)
+  ArUco detects device markers → cloud (Gary knows which device is in view)
+  Soli radar: no gesture → no action
+  ContextProvider polls every 60s → sends calendar/location snapshot to cloud
+  Gary silently builds picture of what user is doing. No interaction, no cost.
+
+────────────────────────────────────────
+VOICE INTERACTION
+────────────────────────────────────────
+  Activation:
+    User pinches → Soli radar → ESP32 → BLE → Phone
+    GestureRecognizer fires → VoiceSession.activate()
+    Simultaneously: glasses LED blue, Dynamic Island "Gary — listening",
+                    AVAudioEngine mic opens, LiveKit room created
+
+  STT → LLM → TTS:
+    Mic → PCM → LiveKit → Deepgram → transcript
+    Transcript + UserContext → Gemini 2.5 Flash
+    Agent decides tool call → dispatches command → WebSocket → Phone
+    Agent speaks response → Cartesia TTS → audio chunks → LiveKit → Phone
+    Phone routes audio → glasses bone conduction
+
+  Smart home parallel execution:
+    Phone receives HomeAssistantCommand
+    isHome check via LocationManager geofence
+    → http://192.168.1.6:8123 → HA executes (~200ms)
+    Lights off while Gary is still speaking
+
+  Total latency user perceives: ~1.2–1.8s from end of speech to Gary speaking
+                                + action executing simultaneously
+
+────────────────────────────────────────
+SCENE UNDERSTANDING
+────────────────────────────────────────
+  User pinches → speaks: "Gary, what's wrong with my code?"
+  Agent: call annotate_screen / describe_screen
+  Cloud → WebSocket → Phone: requestFrame
+  Phone grabs single JPEG from MJPEG buffer
+  Phone → Gemini Vision API (~800ms) with prompt
+  Gemini Vision → text description of issues
+  Agent formulates spoken response + annotation overlay
+  TTS speaks, overlay drawn on laptop screen (if ArUco confirms laptop in view)
+  JPEG discarded immediately — never stored
+
+────────────────────────────────────────
+PROACTIVE NOTIFICATION
+────────────────────────────────────────
+  ContextProvider: calendar poll
+  Upcoming event in 5 minutes detected
+  → WebSocket → Gary agent
+  Agent checks: in voice session? No. Already notified? No. 5-min window? Yes.
+  → glasses LED amber pulse
+  → Dynamic Island: "Standup in 5 min"
+  → bone conduction (optional): "Hey, standup in 5 minutes"
+
+────────────────────────────────────────
+GESTURE-ONLY (no voice)
+────────────────────────────────────────
+  Soli radar detects swipe right → ESP32 → BLE → Phone
+  GestureRecognizer: swipe_right
+  GaryClient → cloud: gestureDetected(swipe_right)
+  Agent: context-aware routing:
+    Music playing? → next track
+    Notification showing? → dismiss
+    Teaching mode active? → next lesson block
+    Default → no action
+  Command back to phone → execute
+
+────────────────────────────────────────
+ARUCO DEVICE RECOGNITION
+────────────────────────────────────────
+  VisionEngine detects ArUco marker #3 → WebSocket → cloud: deviceSeen(3)
+  Gary agent: marker #3 = user's MacBook
+  Changes how Gary interprets next query:
+    "what's wrong with this?" → analyze screen, not room
+    "make it bigger" → adjust laptop brightness, not room lights
+    "close it" → asks for clarification (genuinely ambiguous)
+
+────────────────────────────────────────
+END OF SESSION
+────────────────────────────────────────
+  User removes glasses → BLE disconnects
+  VoiceSession.deactivate(), LiveKit room closed
+  MJPEG socket closed, VisionEngine paused
+  GaryClient → cloud: sessionEnd {duration, gestureCount, voiceTurns}
+  Cloud: compress conversation → summary → Postgres
+         update user memory with learned facts
+         discard all raw audio, frames, intermediate state
+  Phone: clear frame buffer, audio buffers
+  Dynamic Island: dismissed, glasses LED: off
+
+────────────────────────────────────────
+LATENCY SUMMARY
+────────────────────────────────────────
+  Interaction type           Breakdown                              Total
+  ─────────────────────────  ─────────────────────────────────────  ──────
+  Voice → smart home         STT 200 + LLM 400 + tool 200 + TTS 300  ~1.1s
+  Radar gesture → action     BLE 5 + WebSocket 50 + agent 200 + 50   ~300ms
+  Scene understanding        frame 10 + Vision 800 + LLM 300 + TTS   ~1.4s
+  Proactive notification     background poll + WebSocket 50           ~50ms
+  ArUco device recognition   frame decode 8 + WebSocket 50            ~60ms
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 10 — OVERALL TIMELINE & SEQUENCING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Now → July exhibition
+    Hardware: XIAO + 3D printed mount (~$70)
+    Software: existing Mac app + voice agent (no changes)
+    Goal: working demo, not a product
+
+  Post-exhibition (Month 1–2)
+    iOS companion app starts (Swift — GlassesManager + VoiceSession)
+    Custom PCB v1 design (KiCad, 2 boards)
+    Cloud backend deployment (FastAPI + Postgres + Redis)
+    Cost: ~$1,500–2,500 for 5 working units + app skeleton
+
+  Month 3–6
+    iOS app functional: voice + gestures + smart home
+    Subscription billing (Stripe + StoreKit 2)
+    Persistent memory
+    Off-shelf glasses frame with custom PCB
+    Soli radar prototyping
+
+  Month 6–12
+    Wenzhou OEM frame engagement
+    PCB v2: refined, lighter, with Soli radar + IMU
+    Android companion app
+    50–100 unit small batch
+    Budget: $8,000–15,000 hardware + ongoing API costs
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 11 — OPEN QUESTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  [ ] Android or iOS first for companion app?
+  [ ] Subscription price: $19, $24, or $29/month?
+  [ ] Bone conduction vs open-ear for v1 PCB?
+  [ ] Which Wenzhou frame supplier to engage with?
+  [ ] Build iOS app in-house or contract a Swift dev?
+  [ ] What happens to the Mac overlay app post-phone-app?
+        (Kept as desktop companion alongside phone app?)
+  [ ] Soli radar: prototype with BGT60TR13C breakout before committing to PCB?
+  [ ] HA remote access: build Nabu Casa support at launch or Phase 2?
+  [ ] How to handle users who have neither HA nor HomeKit?
+
+================================================================================
+END OF BRAINSTORM — 2026-07-01
+================================================================================

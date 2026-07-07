@@ -47,7 +47,7 @@ Terminal 3 — agent main loop:
     uv run python -m agent.main_loop
 
 
-EXPECTED EVENT FLOW — PINCH (toggle)
+EXPECTED EVENT FLOW — PINCH (toggle)`
 --------------------------------------
 1. Hold ArUco sticker in front of camera 0 (POV camera)
    → monitor shows: device_entered_view {device_id: ..., friendly_name: ...}

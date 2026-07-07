@@ -37,6 +37,9 @@ logs/
 .coverage
 htmlcov/
 
+# Exhibition key manager (contains real API keys — never commit)
+exhibition_keys.txt
+
 # Gary-specific
 # SQLite database files (memory) — local data, don't commit
 *.db

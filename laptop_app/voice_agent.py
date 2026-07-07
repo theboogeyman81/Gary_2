@@ -26,8 +26,8 @@ import google.genai as genai
 import google.genai.types as genai_types
 
 from dotenv import load_dotenv
-from livekit.agents import Agent, AgentSession, JobContext, WorkerOptions, cli, function_tool
-from livekit.plugins import cartesia, deepgram, google, silero
+from livekit.agents import Agent, AgentSession, JobContext, JobProcess, WorkerOptions, cli, function_tool
+from livekit.plugins import deepgram, google, silero, elevenlabs
 
 from bus.redis_bus import Bus
 from events.schema import Event
@@ -87,19 +87,18 @@ _STATE_TO_BUS = {
 
 
 class GaryVoiceAgent(Agent):
-    def __init__(self, bus: Bus) -> None:
+    def __init__(self, bus: Bus, vad: silero.VAD) -> None:
         super().__init__(
             instructions=GARY_SYSTEM_PROMPT,
             stt=deepgram.STT(model="nova-3"),
-            vad=silero.VAD.load(),
+            vad=vad,
             llm=google.LLM(
                 model="gemini-2.5-flash",
                 api_key=os.getenv("GOOGLE_API_KEY"),
             ),
-            tts=cartesia.TTS(
-                voice="248be419-c632-4f23-adf1-5324ed7dbf1d",  # Barbershop Man — clear, warm
-                model="sonic-2",
-                api_key=os.getenv("CARTESIA_API_KEY"),
+            tts=elevenlabs.TTS(
+                voice_id=os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"),
+                api_key=os.getenv("ELEVENLABS_API_KEY"),
             ),
         )
         self._bus = bus
@@ -192,6 +191,10 @@ class GaryVoiceAgent(Agent):
         return await launch_tv_app_impl(app, self._bus)
 
 
+def prewarm(proc: JobProcess) -> None:
+    proc.userdata["vad"] = silero.VAD.load()
+
+
 async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect()
     logger.info("[gary-voice] Connected to room: %s", ctx.room.name)
@@ -222,7 +225,8 @@ async def entrypoint(ctx: JobContext) -> None:
             asyncio.create_task(_pub(bus_type))
             logger.info("[gary-voice] state → %s", ev.new_state)
 
-    await session.start(GaryVoiceAgent(bus=bus), room=ctx.room)
+    vad = ctx.proc.userdata["vad"]
+    await session.start(GaryVoiceAgent(bus=bus, vad=vad), room=ctx.room)
     logger.info("[gary-voice] Session started")
 
     # LiveKit 1.5 removed Room.wait_for_disconnect(); wait on the event instead.
@@ -242,4 +246,4 @@ async def entrypoint(ctx: JobContext) -> None:
 
 
 if __name__ == "__main__":
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint, prewarm_fnc=prewarm))

@@ -1,0 +1,179 @@
+================================================================================
+GARY PRODUCT — FULL TASK LIST
+================================================================================
+Created: 2026-07-01
+New repo: gary-product (separate from Gary_2)
+Gary_2 stays untouched — exhibition code only
+================================================================================
+
+Repo structure (gary-product):
+  android/       ← companion app (Kotlin + Jetpack Compose)
+  cloud/         ← FastAPI backend
+  hardware/      ← PCB + 3D models + radar
+  docs/          ← specs carried over from Gary_2 brainstorm
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MILESTONE 1 — EXHIBITION PREP (Gary_2 repo, existing code)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[ ] Merge feature/screen-annotation → main
+[ ] Persistent memory across sessions (SQLite)
+[ ] Streaming TTS latency fix (Cartesia chunk mode)
+[ ] Meeting mode (detect Zoom/Meet → transcribe → overlay)
+[ ] Mac .app bundle (PyInstaller)
+[ ] Menu bar icon (rumps, replaces spacebar hold)
+[ ] Graceful HA fallback when off home network
+[ ] 3D print mount for XIAO on glasses frame
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MILESTONE 2 — ANDROID APP (android/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── SETUP ───────────────────────────────────────────────────────────────────────
+[ ] Create Android project (Kotlin + Jetpack Compose)
+[ ] Add all dependencies (MediaPipe, TFLite, LiveKit, OkHttp, OpenCV)
+[ ] Set up folder structure (GlassesManager, VisionEngine, etc.)
+[ ] AndroidManifest permissions (BLE, mic, location, internet)
+[ ] Foreground Service for background BLE + audio
+
+── GLASSESMANAGER ──────────────────────────────────────────────────────────────
+[ ] BLE scan + connect to ESP32
+[ ] MJPEG stream decode (WiFi)
+[ ] Auto-reconnect on drop`
+[ ] BLE event receive (touch strip, battery, radar gestures)
+[ ] BLE audio send → bone conduction
+
+── VISIONENGINE ────────────────────────────────────────────────────────────────
+[ ] MediaPipe Hands integration
+[ ] YOLOv8n TFLite integration
+[ ] ArUco detection (OpenCV Android)
+[ ] Frame pipeline (ring buffer, background thread)
+
+── GESTURERECOGNIZER ───────────────────────────────────────────────────────────
+[ ] Gesture state machine (pinch, swipe, hold, tap)
+[ ] Debounce / cooldown logic
+[ ] Context-aware gesture routing
+
+── VOICESESSION ────────────────────────────────────────────────────────────────
+[ ] LiveKit room management
+[ ] Microphone capture (AudioRecord raw PCM)
+[ ] TTS audio → bone conduction routing
+[ ] State machine (idle → listening → thinking → speaking)
+
+── GARYCLIENT ──────────────────────────────────────────────────────────────────
+[ ] WebSocket connection to cloud`
+[ ] Event protocol (phone → cloud: gestures, objects, context, frames)
+[ ] Command protocol (cloud → phone: HA calls, overlays, audio)
+[ ] Auth (JWT)
+[ ] Reconnect with exponential backoff
+
+── SMARTHOMEMANAGER ────────────────────────────────────────────────────────────
+[ ] HA local API relay (when home)
+[ ] Nabu Casa remote relay (when away)
+[ ] Philips Hue local API
+[ ] Am I home? geofence (Android geofencing API)
+
+── CONTEXTPROVIDER ─────────────────────────────────────────────────────────────
+[ ] Calendar integration (Android Calendar Provider)
+[ ] Location (geofencing for home detection)
+[ ] Contacts
+[ ] Context snapshot injected into every Gary cloud call
+
+── UI (JETPACK COMPOSE) ────────────────────────────────────────────────────────
+[ ] MainScreen (minimal status dot + voice state label)
+[ ] OnboardingScreen (glasses pair → smart home → permissions)
+[ ] SettingsScreen (HA URL, subscription, voice settings)
+[ ] PermissionsScreen (BLE, mic, location runtime requests)
+[ ] Persistent notification (Foreground Service status)
+
+── BILLING ─────────────────────────────────────────────────────────────────────
+[ ] Google Play Billing Library integration
+[ ] Subscription tiers ($24–29/month)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MILESTONE 3 — CLOUD BACKEND (cloud/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── SETUP ───────────────────────────────────────────────────────────────────────
+[ ] FastAPI project scaffold
+[ ] Postgres setup (users, memory, conversation summaries)
+[ ] Redis (WebSocket event routing)
+[ ] Docker + docker-compose
+[ ] Deploy to cloud (Railway / Render / Fly.io)
+
+── GARY AGENT ──────────────────────────────────────────────────────────────────
+[ ] Port existing Python agent logic to cloud service
+[ ] WebSocket server (phone ↔ cloud event bus)
+[ ] Context injection per turn (UserContext from phone)
+[ ] Gemini 2.5 Flash LLM integration
+[ ] Tool dispatch (HA relay, Vision, annotate, teach, YouTube notes)
+
+── VOICE PIPELINE ──────────────────────────────────────────────────────────────
+[ ] LiveKit server-side integration
+[ ] Deepgram STT
+[ ] Cartesia TTS streaming (chunk mode)
+[ ] Session management per user
+
+── USER LAYER ──────────────────────────────────────────────────────────────────
+[ ] Auth (JWT + refresh tokens)
+[ ] User accounts (register, login)
+[ ] Stripe webhook handler (subscription events)
+[ ] Per-user Gary memory (learned facts, preferences)
+[ ] Conversation summary storage (text only, never audio/video)
+
+── PRIVACY ─────────────────────────────────────────────────────────────────────
+[ ] Frame discard after Gemini Vision call (never persist)
+[ ] Audio discard after transcription
+[ ] Data retention policy enforcement
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+MILESTONE 4 — HARDWARE V1 (hardware/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+── RADAR PROTOTYPE (SOLI-STYLE) ────────────────────────────────────────────────
+[ ] Order Infineon BGT60TR13C breakout board
+[ ] Wire to existing XIAO ESP32-S3
+[ ] Flash gesture detection firmware (Infineon SDK)
+[ ] Validate: pinch, swipe, slide gestures work
+[ ] Measure real-world accuracy
+
+── CUSTOM PCB DESIGN ───────────────────────────────────────────────────────────
+[ ] Right temple board (ESP32-S3 + OV5640 + BGT60TR13C + BQ24079 + touch)
+[ ] Left temple board (mics + MAX98357A + bone conduction + battery)
+[ ] FPC ribbon connector between boards
+[ ] KiCad schematic + layout review
+[ ] DRC (design rule check) for JLCPCB
+[ ] Order 5 units from JLCPCB (PCB + PCBA)
+[ ] Bring-up + debugging
+
+── FRAME ───────────────────────────────────────────────────────────────────────
+[ ] 3D model: temple arm housing (Fusion 360)
+[ ] Test print (FDM for fit check)
+[ ] Final print (SLA resin for exhibition quality)
+[ ] Integrate PCB into frame
+
+── CAMERA ──────────────────────────────────────────────────────────────────────
+[ ] OV5640 module + M12 wide-angle lens ordered
+[ ] Test MJPEG stream to Android phone
+[ ] Validate VisionEngine runs on OV5640 frames
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OPEN QUESTIONS (decide before starting each milestone)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[ ] New repo name: gary-product or something else?
+[ ] Android min SDK: API 26 (Android 8) or higher?
+[ ] Cloud host: Railway, Render, or Fly.io?
+[ ] Subscription price: $19, $24, or $29/month?
+[ ] Soli radar: prototype first before committing to PCB design?
+[ ] iOS: when to add (after Android is stable, need to buy iPhone)?
+[ ] Mac overlay app: keep as desktop companion alongside phone app?
+
+================================================================================
+END OF TASK LIST
+================================================================================
